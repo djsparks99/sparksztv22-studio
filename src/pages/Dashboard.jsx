@@ -36,10 +36,14 @@ export default function Dashboard() {
   useLivepeerAutoPoll(channel?.username);
 
   const load = async () => {
-    const { data } = await api.get("/channels/mine");
-    setChannel(data);
-    setTitle(data.stream_title || "");
-    setCategory(data.category || "music");
+    try {
+      const { data } = await api.get("/channels/mine");
+      setChannel(data);
+      setTitle(data.stream_title || "");
+      setCategory(data.category || "music");
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   useEffect(() => {
@@ -85,39 +89,54 @@ export default function Dashboard() {
   const createStream = async () => {
     setCreatingStream(true);
     try {
-      const apiKey = import.meta.env.VITE_LIVEPEER_API_KEY || "";
-      
-      const response = await fetch("https://livepeer.studio/api/stream", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ name: `${channel?.username || "stream"}-session` }),
-      });
-
-      if (!response.ok) throw new Error("Livepeer API failed");
-      const streamData = await response.json();
-
-      const updatedChannelData = {
-        ...channel,
-        stream_key: streamData.streamKey || streamData.stream_key || "",
-        rtmp_url: "rtmp://rtmp.livepeer.com/live",
-        playback_url: `https://livepeer.com/playback/${streamData.playbackId || streamData.playback_id}/index.m3u8`,
-        playback_id: streamData.playbackId || streamData.playback_id || "",
-      };
-
-      setChannel(updatedChannelData);
-      toast.success("Livepeer stream generated successfully!");
+      // First try backend stream creation endpoint
+      const { data } = await api.post("/stream/create");
+      if (data && data.channel) {
+        setChannel(data.channel);
+        toast.success("Livepeer stream generated successfully!");
+      } else {
+        await load();
+        toast.success("Livepeer stream updated!");
+      }
     } catch (error) {
       console.error(error);
-      toast.error("Livepeer stream creation failed. Check your API key in Cloudflare settings.");
+      // Fallback if client direct Livepeer key exists
+      const apiKey = import.meta.env.VITE_LIVEPEER_API_KEY || "";
+      if (apiKey) {
+        try {
+          const response = await fetch("https://livepeer.studio/api/stream", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ name: `${channel?.username || "stream"}-session` }),
+          });
+          if (response.ok) {
+            const streamData = await response.json();
+            const updatedChannelData = {
+              ...channel,
+              stream_key: streamData.streamKey || streamData.stream_key || "",
+              rtmp_url: "rtmp://rtmp.livepeer.com/live",
+              playback_url: `https://livepeer.com/playback/${streamData.playbackId || streamData.playback_id}/index.m3u8`,
+              playback_id: streamData.playbackId || streamData.playback_id || "",
+            };
+            setChannel(updatedChannelData);
+            toast.success("Livepeer stream generated successfully!");
+            return;
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      }
+      toast.error("Stream creation failed.");
     } finally {
       setCreatingStream(false);
     }
   };
 
   const copy = (text, label) => {
+    if (!text) return;
     navigator.clipboard.writeText(text);
     toast.success(`${label} copied.`);
   };
@@ -136,7 +155,7 @@ export default function Dashboard() {
         <div>
           <div className="label-caps">// STUDIO</div>
           <h1 className="font-display text-4xl font-black tracking-tighter sm:text-5xl">
-            {user?.display_name?.toUpperCase()}
+            {user?.display_name?.toUpperCase() || channel?.username?.toUpperCase()}
           </h1>
           <div className="mt-1 font-mono text-xs text-zinc-500">
             /channel/{channel.username}
@@ -410,7 +429,7 @@ function ThumbnailUploader({ channel, onChange }) {
 
   return (
     <div className="border border-[#27272a] bg-[#0a0a0a] p-6" data-testid="thumbnail-uploader">
-      <div className="fn flex items-center gap-2">
+      <div className="flex items-center gap-2">
         <ImageIcon className="h-3.5 w-3.5 text-[#e5ff00]" />
         <div className="label-caps mb-0">// PREVIEW THUMBNAIL</div>
       </div>
