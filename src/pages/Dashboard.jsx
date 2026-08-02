@@ -85,14 +85,30 @@ export default function Dashboard() {
   const createStream = async () => {
     setCreatingStream(true);
     try {
-      const { data } = await api.post("/stream/create");
-      if (data.channel) {
-        setChannel(data.channel);
-      } else {
-        await load();
-      }
-      toast.success("Livepeer stream created & synced to Firestore!");
-    } catch {
+      const response = await fetch("https://livepeer.studio/api/stream", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${import.meta.env.VITE_LIVEPEER_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ name: `${channel.username}-stream` }),
+      });
+
+      if (!response.ok) throw new Error("Livepeer API failed");
+      const streamData = await response.json();
+
+      const updatedChannelData = {
+        ...channel,
+        stream_key: streamData.streamKey,
+        rtmp_url: "rtmp://rtmp.livepeer.com/live",
+        playback_url: `https://livepeer.com/playback/${streamData.playbackId}/index.m3u8`,
+        playback_id: streamData.playbackId,
+      };
+
+      setChannel(updatedChannelData);
+      toast.success("Livepeer stream generated successfully!");
+    } catch (error) {
+      console.error(error);
       toast.error("Livepeer stream creation failed.");
     } finally {
       setCreatingStream(false);
@@ -457,4 +473,3 @@ function ThumbnailUploader({ channel, onChange }) {
     </div>
   );
 }
-
