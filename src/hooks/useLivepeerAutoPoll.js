@@ -1,5 +1,4 @@
 import { useEffect } from "react";
-import { api } from "@/lib/api";
 import { db } from "@/lib/firebase";
 import { doc, setDoc } from "firebase/firestore";
 
@@ -9,22 +8,27 @@ export function useLivepeerAutoPoll(channelIdentifier) {
 
     const pollStatus = async () => {
       try {
-        const payload = {
-          doc_id: "nsU1v44XFnN3FloJvNePqj6CBG2",
-        };
-        if (channelIdentifier) {
-          payload.username = channelIdentifier;
-          payload.channel_id = channelIdentifier;
-        }
+        // If we don't have a playback ID or stream identifier to check, skip
+        if (!channelIdentifier) return;
 
-        // Call backend server endpoint which uses Firebase Admin SDK & Livepeer API
-        const { data } = await api.post("/livepeer/check-status", payload);
+        // Directly query Livepeer Studio API to check stream active status
+        const response = await fetch(`https://livepeer.studio/api/stream?streamId=${channelIdentifier}`, {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${import.meta.env.VITE_LIVEPEER_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+        });
 
-        if (!cancelled && data && typeof data.is_live === "boolean") {
-          const isLive = Boolean(data.is_live);
-          const nowIso = new Date().toISOString();
+        if (!response.ok) return;
+        const streams = await response.json();
+        
+        // Find if any returned stream is currently active/streaming
+        const activeStream = streams.find((s) => s.isActive);
+        const isLive = Boolean(activeStream);
+        const nowIso = new Date().toISOString();
 
-          // Also perform direct client-side update to Firestore document for dual-path real-time sync
+        if (!cancelled) {
           const primaryDocId = "nsU1v44XFnN3FloJvNePqj6CBG2";
           await setDoc(
             doc(db, "channels", primaryDocId),
@@ -53,11 +57,8 @@ export function useLivepeerAutoPoll(channelIdentifier) {
       }
     };
 
-    // Execute immediately on page load / view mount
     pollStatus();
-
-    // Poll every 4 seconds in the background
-    const interval = setInterval(pollStatus, 4000);
+    const interval = setInterval(pollStatus, 10000); // Polling every 10 seconds to stay well within rate limits
 
     return () => {
       cancelled = true;
