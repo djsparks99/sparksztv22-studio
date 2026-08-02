@@ -89,46 +89,38 @@ export default function Dashboard() {
   const createStream = async () => {
     setCreatingStream(true);
     try {
-      // First try backend stream creation endpoint
-      const { data } = await api.post("/stream/create");
-      if (data && data.channel) {
-        setChannel(data.channel);
-        toast.success("Livepeer stream generated successfully!");
+      // Call serverless / functions endpoint /livepeer/streams
+      let response = await fetch("/livepeer/streams", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: `${channel?.username || "stream"}-session` }),
+      });
+
+      if (!response.ok) {
+        // Fallback to Express backend endpoint
+        const { data } = await api.post("/stream/create");
+        if (data && data.channel) {
+          setChannel(data.channel);
+          toast.success("Livepeer stream generated successfully!");
+          return;
+        }
       } else {
-        await load();
-        toast.success("Livepeer stream updated!");
+        const streamData = await response.json();
+        const updatedChannelData = {
+          ...channel,
+          stream_key: streamData.streamKey || streamData.stream_key || "",
+          rtmp_url: streamData.rtmp_url || "rtmp://rtmp.livepeer.com/live",
+          playback_url: streamData.playback_url || `https://livepeer.com/playback/${streamData.playbackId || streamData.playback_id}/index.m3u8`,
+          playback_id: streamData.playbackId || streamData.playback_id || "",
+        };
+        setChannel(updatedChannelData);
+        toast.success("Livepeer stream generated successfully!");
+        return;
       }
+      await load();
+      toast.success("Livepeer stream updated!");
     } catch (error) {
       console.error(error);
-      // Fallback if client direct Livepeer key exists
-      const apiKey = import.meta.env.VITE_LIVEPEER_API_KEY || "";
-      if (apiKey) {
-        try {
-          const response = await fetch("https://livepeer.studio/api/stream", {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${apiKey}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ name: `${channel?.username || "stream"}-session` }),
-          });
-          if (response.ok) {
-            const streamData = await response.json();
-            const updatedChannelData = {
-              ...channel,
-              stream_key: streamData.streamKey || streamData.stream_key || "",
-              rtmp_url: "rtmp://rtmp.livepeer.com/live",
-              playback_url: `https://livepeer.com/playback/${streamData.playbackId || streamData.playback_id}/index.m3u8`,
-              playback_id: streamData.playbackId || streamData.playback_id || "",
-            };
-            setChannel(updatedChannelData);
-            toast.success("Livepeer stream generated successfully!");
-            return;
-          }
-        } catch (e) {
-          console.error(e);
-        }
-      }
       toast.error("Stream creation failed.");
     } finally {
       setCreatingStream(false);

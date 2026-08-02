@@ -1287,6 +1287,48 @@ async function startServer() {
   api.post("/livepeer/check-status", handleCheckLivepeerStatus);
   api.get("/livepeer/check-status", handleCheckLivepeerStatus);
 
+  const handleCreateLivepeerStream = async (req: any, res: any) => {
+    try {
+      const name = req.body?.name || "stream-session";
+      const apiKey = process.env.LIVEPEER_API_KEY;
+      if (!apiKey) {
+        return res.status(500).json({ error: "LIVEPEER_API_KEY environment variable is not set." });
+      }
+
+      const lpRes = await fetch("https://livepeer.studio/api/stream", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ name }),
+      });
+
+      if (!lpRes.ok) {
+        const errText = await lpRes.text();
+        return res.status(lpRes.status).json({ error: "Livepeer API error", details: errText });
+      }
+
+      const streamData: any = await lpRes.json();
+      return res.status(200).json({
+        id: streamData.id,
+        streamKey: streamData.streamKey,
+        playbackId: streamData.playbackId,
+        stream_key: streamData.streamKey,
+        playback_id: streamData.playbackId,
+        rtmp_url: "rtmp://rtmp.livepeer.com/live",
+        playback_url: `https://livepeer.com/playback/${streamData.playbackId}/index.m3u8`,
+      });
+    } catch (err: any) {
+      console.error("Error creating Livepeer stream:", err);
+      return res.status(500).json({ error: err.message });
+    }
+  };
+
+  app.post("/livepeer/streams", handleCreateLivepeerStream);
+  app.post("/api/livepeer/streams", handleCreateLivepeerStream);
+  api.post("/livepeer/streams", handleCreateLivepeerStream);
+
   // Auth: Register
   api.post("/auth/register", async (req, res) => {
     const { email, password, username, display_name } = req.body || {};
