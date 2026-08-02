@@ -1413,7 +1413,23 @@ async function startServer() {
       }
     }
 
-    // Call Livepeer API to generate stream credentials
+    const forceNew = Boolean(req.body?.forceNew || req.body?.force_new);
+
+    // Reuse existing persistent stream key if available and new key was not explicitly forced
+    if (targetChannel && targetChannel.stream_key && targetChannel.playback_id && !forceNew) {
+      return res.json({
+        success: true,
+        channel_id: targetChannel.channel_id,
+        livepeer_stream_id: targetChannel.livepeer_stream_id,
+        stream_key: targetChannel.stream_key,
+        playback_id: targetChannel.playback_id,
+        rtmp_url: "rtmp://rtmp.livepeer.com/live",
+        playback_url: `https://livepeercdn.studio/hls/${targetChannel.playback_id}/index.m3u8`,
+        channel: channelPublic(targetChannel, { include_stream_key: true }),
+      });
+    }
+
+    // Call Livepeer API to generate new stream credentials
     const livepeerStream = await createLivepeerStream(user.username);
 
     if (targetChannel) {
@@ -1600,10 +1616,23 @@ async function startServer() {
   });
 
   // Get my channel
-  api.get("/channels/mine", requireAuth, (req, res) => {
+  api.get("/channels/mine", requireAuth, async (req, res) => {
     const user = (req as any).user as UserDoc;
     for (const c of db.channels.values()) {
       if (c.user_uid === user.uid) {
+        if (!c.stream_key || !c.playback_id) {
+          try {
+            const lp = await createLivepeerStream(c.username);
+            c.livepeer_stream_id = lp.id;
+            c.stream_key = lp.streamKey;
+            c.playback_id = lp.playbackId;
+            c.last_updated = nowIso();
+            await syncChannelToFirestore(c);
+          } catch (e) {
+            console.error("Auto stream creation on channel fetch failed:", e);
+          }
+        }
+
         const followers = getFollowerCount(c.username);
         const subscribers = getSubscriberCount(c.username);
         const activeViewers = c.is_live ? getActiveViewerCount(c.username) : 0;
@@ -1623,7 +1652,7 @@ async function startServer() {
   // Update my channel
   api.patch("/channels/mine", requireAuth, (req, res) => {
     const user = (req as any).user as UserDoc;
-    const { stream_title, category, schedule } = req.body || {};
+    const { stream_title, category, schedule, stream_key, playback_id, livepeer_stream_id } = req.body || {};
 
     if (category && !CATEGORIES.includes(category)) {
       return res.status(400).json({ error: "Invalid category" });
@@ -1633,6 +1662,9 @@ async function startServer() {
       if (c.user_uid === user.uid) {
         if (stream_title !== undefined) c.stream_title = String(stream_title);
         if (category !== undefined) c.category = String(category);
+        if (stream_key !== undefined) c.stream_key = String(stream_key);
+        if (playback_id !== undefined) c.playback_id = String(playback_id);
+        if (livepeer_stream_id !== undefined) c.livepeer_stream_id = String(livepeer_stream_id);
         if (Array.isArray(schedule)) {
           c.schedule = schedule.map((item: any) => ({
             id: String(item.id || crypto.randomUUID()),

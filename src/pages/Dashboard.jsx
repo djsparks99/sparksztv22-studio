@@ -38,9 +38,28 @@ export default function Dashboard() {
   const load = async () => {
     try {
       const { data } = await api.get("/channels/mine");
-      setChannel(data);
-      setTitle(data.stream_title || "");
-      setCategory(data.category || "music");
+      if (data) {
+        setChannel(data);
+        setTitle(data.stream_title || "");
+        setCategory(data.category || "music");
+
+        // Automatically fetch/ensure permanent stream key if missing
+        if (!data.stream_key || !data.playback_id) {
+          const res = await api.post("/stream/create", { forceNew: false });
+          if (res.data && res.data.channel) {
+            setChannel(res.data.channel);
+          } else if (res.data && res.data.stream_key) {
+            setChannel((prev) => ({
+              ...prev,
+              stream_key: res.data.stream_key,
+              playback_id: res.data.playback_id,
+              livepeer_stream_id: res.data.livepeer_stream_id,
+              rtmp_url: res.data.rtmp_url || "rtmp://rtmp.livepeer.com/live",
+              playback_url: res.data.playback_url,
+            }));
+          }
+        }
+      }
     } catch (e) {
       console.error(e);
     }
@@ -86,43 +105,69 @@ export default function Dashboard() {
     }
   };
 
-  const createStream = async () => {
+  const createStream = async (forceNew = true) => {
     setCreatingStream(true);
     try {
-      // Call serverless / functions endpoint /livepeer/streams
-      let response = await fetch("/livepeer/streams", {
+      // Primary: call backend endpoint to fetch or create stream key and persist in database
+      const { data } = await api.post("/stream/create", { forceNew });
+      if (data && (data.channel || data.stream_key)) {
+        const updatedChannel = data.channel || {
+          ...channel,
+          stream_key: data.stream_key,
+          playback_id: data.playback_id,
+          livepeer_stream_id: data.livepeer_stream_id,
+          rtmp_url: data.rtmp_url || "rtmp://rtmp.livepeer.com/live",
+          playback_url: data.playback_url || `https://livepeercdn.studio/hls/${data.playback_id}/index.m3u8`,
+        };
+        setChannel(updatedChannel);
+        setReveal(true);
+
+        // Explicitly persist to /channels/mine
+        await api.patch("/channels/mine", {
+          stream_key: updatedChannel.stream_key,
+          playback_id: updatedChannel.playback_id,
+          livepeer_stream_id: updatedChannel.livepeer_stream_id,
+        }).catch(() => {});
+
+        toast.success(forceNew ? "New permanent Livepeer key generated & saved!" : "Permanent stream key loaded.");
+        return;
+      }
+
+      // Fallback: serverless function endpoint
+      const response = await fetch("/livepeer/streams", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: `${channel?.username || "stream"}-session` }),
       });
 
-      if (!response.ok) {
-        // Fallback to Express backend endpoint
-        const { data } = await api.post("/stream/create");
-        if (data && data.channel) {
-          setChannel(data.channel);
-          toast.success("Livepeer stream generated successfully!");
-          return;
-        }
-      } else {
+      if (response.ok) {
         const streamData = await response.json();
         const updatedChannelData = {
           ...channel,
           stream_key: streamData.streamKey || streamData.stream_key || "",
           rtmp_url: streamData.rtmp_url || "rtmp://rtmp.livepeer.com/live",
-          playback_url: streamData.playback_url || `https://livepeer.com/playback/${streamData.playbackId || streamData.playback_id}/index.m3u8`,
+          playback_url: streamData.playback_url || `https://livepeercdn.studio/hls/${streamData.playbackId || streamData.playback_id}/index.m3u8`,
           playback_id: streamData.playbackId || streamData.playback_id || "",
+          livepeer_stream_id: streamData.id || "",
         };
         setChannel(updatedChannelData);
         setReveal(true);
-        toast.success("Livepeer stream generated successfully!");
+
+        // Save to backend database so it persists across refreshes
+        await api.patch("/channels/mine", {
+          stream_key: updatedChannelData.stream_key,
+          playback_id: updatedChannelData.playback_id,
+          livepeer_stream_id: updatedChannelData.livepeer_stream_id,
+        }).catch(() => {});
+
+        toast.success("Livepeer stream key saved permanently!");
         return;
       }
+
       await load();
-      toast.success("Livepeer stream updated!");
     } catch (error) {
       console.error(error);
-      toast.error("Stream creation failed.");
+      toast.error("Stream key operation failed.");
     } finally {
       setCreatingStream(false);
     }
@@ -208,16 +253,20 @@ export default function Dashboard() {
           {/* Broadcast credentials */}
           <div className="mt-6 border border-[#27272a] bg-[#0a0a0a] p-6">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-              <div className="label-caps mb-0">// BROADCAST CREDENTIALS (LIVEPEER)</div>
+              <div className="label-caps mb-0">// BROADCAST CREDENTIALS (PERMANENT LIVEPEER KEY)</div>
               <div className="flex items-center gap-3">
                 <button
                   data-testid="create-stream-btn"
-                  onClick={createStream}
+                  onClick={() => createStream(true)}
                   disabled={creatingStream}
                   className="btn-ghost inline-flex items-center gap-1.5 text-xs text-[#e5ff00]"
                 >
                   <RefreshCw className={`h-3 w-3 ${creatingStream ? "animate-spin" : ""}`} />
-                  {creatingStream ? "GENERATING..." : "NEW LIVEPEER KEY"}
+                  {creatingStream
+                    ? "GENERATING..."
+                    : channel?.stream_key
+                    ? "REGENERATE KEY"
+                    : "GENERATE KEY"}
                 </button>
                 <a
                   href="https://obsproject.com/"
