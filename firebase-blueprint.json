@@ -1,0 +1,83 @@
+{
+  "version": "1.0",
+  "collections": {
+    "users": {
+      "path": "users/{userId}",
+      "description": "User profile information with permanent locked username",
+      "allow": {
+        "read": "true",
+        "create": "request.auth != null && request.auth.uid == userId",
+        "update": "request.auth != null && request.auth.uid == userId",
+        "delete": "false"
+      },
+      "fields": {
+        "uid": { "type": "string", "required": true },
+        "email": { "type": "string", "required": true },
+        "username": { "type": "string", "required": true },
+        "display_name": { "type": "string", "required": true },
+        "username_locked": { "type": "boolean", "required": true },
+        "photo_url": { "type": "string", "required": false },
+        "bio": { "type": "string", "required": false },
+        "created_at": { "type": "string", "required": true }
+      }
+    },
+    "channels": {
+      "path": "channels/{channelId}",
+      "description": "Live streaming channels",
+      "allow": {
+        "read": "true",
+        "create": "request.auth != null",
+        "update": "request.auth != null",
+        "delete": "false"
+      },
+      "fields": {
+        "channel_id": { "type": "string", "required": true },
+        "user_uid": { "type": "string", "required": true },
+        "username": { "type": "string", "required": true },
+        "display_name": { "type": "string", "required": true },
+        "photo_url": { "type": "string", "required": false },
+        "thumbnail_url": { "type": "string", "required": false },
+        "playback_id": { "type": "string", "required": true },
+        "stream_title": { "type": "string", "required": true },
+        "category": { "type": "string", "required": true },
+        "is_live": { "type": "boolean", "required": true },
+        "viewer_count": { "type": "number", "required": true },
+        "last_updated": { "type": "string", "required": true }
+      }
+    },
+    "chat_messages": {
+      "path": "chat_messages/{messageId}",
+      "description": "Live chat messages per channel",
+      "allow": {
+        "read": "true",
+        "create": "request.auth != null",
+        "update": "false",
+        "delete": "false"
+      },
+      "fields": {
+        "channel_username": { "type": "string", "required": true },
+        "text": { "type": "string", "required": true },
+        "sender_uid": { "type": "string", "required": true },
+        "sender_username": { "type": "string", "required": true },
+        "sender_display_name": { "type": "string", "required": true },
+        "created_at": { "type": "string", "required": true }
+      }
+    },
+    "shoutbox": {
+      "path": "shoutbox/{shoutId}",
+      "description": "Pirate radio frequency shoutbox ticker messages",
+      "allow": {
+        "read": "true",
+        "create": "request.auth != null",
+        "update": "false",
+        "delete": "false"
+      },
+      "fields": {
+        "text": { "type": "string", "required": true },
+        "sender_username": { "type": "string", "required": true },
+        "sender_display_name": { "type": "string", "required": true },
+        "created_at": { "type": "string", "required": true }
+      }
+    }
+  }
+}

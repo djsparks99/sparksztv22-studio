@@ -1,0 +1,33 @@
+{
+  "summary": "Backend-only test iteration for the legacy test-account purge (iter 11). Created /app/backend/tests/test_purge.py with 20 tests covering: (a) _is_test_email() pure-function categorization (12 parametrized cases including DJ SPARKZ negative), (b) full cascade delete of _purge_test_accounts() across all 7 collections (users, channels, follows, subscriptions, notifications, chat_messages, sessions, viewer_sessions), (c) real (non-test-shaped) users survive the purge, (d) idempotency on empty DB (3 back-to-back invocations), (e) DJ SPARKZ (markysparks99@gmail.com) + channel survive, (f) regression on /api/channels, /api/channels/djsparkz, /api/auth/login. All 20 tests PASS. Post-run DB contains only djsparkz.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/channels", "issue": "list_channels raises KeyError('channel_id') if any channel doc lacks channel_id — surfaced when test seeds a partial channel row. channel_public() at server.py:175 should tolerate missing keys (use .get) or the loop at server.py:682 should skip malformed docs. Not user-facing today because real channels always have channel_id, but it is a latent 500-risk if any bad row ever enters db.channels."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_purge.py",
+    "/app/test_reports/pytest/purge_results.xml"
+  ],
+  "action_items": [
+    "Consider hardening channel_public() / list_channels() with .get() fallbacks so a single malformed channel doc cannot 500 the entire /api/channels endpoint.",
+    "Consider migrating @app.on_event('startup'/'shutdown') to FastAPI lifespan handlers (deprecation warnings emitted)."
+  ],
+  "critical_code_review_comments": [
+    "_TEST_EMAIL_PATTERNS regex is well-scoped: @pirate.radio (fictional TLD) is a full-domain match, and the sparkz.tv branch REQUIRES prefix_<hex>@sparkz.tv, so plain 'test123@sparkz.tv' or 'random@sparkz.tv' cannot match — verified via parametrized test. DJ SPARKZ (@gmail.com) can never be matched.",
+    "_purge_test_accounts is properly idempotent — early-returns on empty victim list before issuing any delete_many, so a clean boot performs zero writes.",
+    "Cascade covers all 7 documented collections. follows/subscriptions/notifications/chat_messages use $or on both actor-uid AND channel_username, so bidirectional refs are cleaned.",
+    "startup() wraps _purge_test_accounts() in try/except and logs at WARNING — a purge failure won't crash boot. Good.",
+    "Minor: KeyError risk in channel_public() (see backend_issues.minor)."
+  ],
+  "updated_files": ["/app/backend/tests/test_purge.py"],
+  "success_rate": {"backend": "100% (20/20)", "frontend": "N/A (skipped per request)"},
+  "test_credentials": "None used. Tests seed directly into MongoDB via the module-level motor db handle and clean up in teardown or via the purge itself.",
+  "seed_data_creation": "Ephemeral: each async test seeds users with test-shaped emails (test_*/sub_*@pirate.radio|sparkz.tv) + child docs, then invokes _purge_test_accounts() which removes them. Real-user survival test cleans up its own real_*@yourdomain.com seed in a finally block. Post-run DB verified to contain ONLY djsparkz.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "pytest.ini pins '-n 2 --dist loadscope' via xdist. To run serial for debugging use '-n 0' (NOT '-p no:xdist'). pytest-asyncio 1.4 defaults to function-scoped event loops — since Motor binds its client to the first loop it sees, subsequent async tests fail with 'Event loop is closed'. Fix used here: decorate every async test with @pytest.mark.asyncio(loop_scope='session'). Do not remove that scope argument.",
+  "rca of the issue": "N/A — this iteration validated the fix, not diagnosing a regression. The one incidental finding (KeyError in /api/channels for channel docs missing 'channel_id') was self-inflicted by an earlier partial test seed; production channels always carry channel_id so end users are unaffected, but the endpoint is not defensive."
+}

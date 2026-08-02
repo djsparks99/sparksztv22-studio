@@ -1,0 +1,58 @@
+{
+  "summary": "Frontend-only bug-fix verification for the Livepeer HLS iframe player swap. Tested /channel/testdj offline+live, /dashboard offline+live, sibling components, and the SessionList inline VOD wiring. All targeted assertions passed. DB was flipped to is_live:true for live-state tests and reset to false afterward.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_results": {
+    "channel_offline": {
+      "hls-player-offline_present": true,
+      "text_contains_BROADCASTER_IS_OFFLINE": true,
+      "no_iframe_rendered": true,
+      "siblings_render (session-list, back-to-browse)": true
+    },
+    "channel_live": {
+      "hls-player_present": true,
+      "iframe_present": true,
+      "iframe_src": "https://lvpr.tv/?v=0740whyn4tew0f9c&autoplay=1&muted=1&lowLatency=true",
+      "starts_with_https_lvpr_tv": true,
+      "has_v_playback_id": true,
+      "has_autoplay_1": true,
+      "has_muted_1": true,
+      "iframe_covers_video_shell": "true (iframe box 918x515.5 inside 920x517.5 shell — 1px border on each side, expected)",
+      "element_at_iframe_center": "IFRAME (no overlay blocking clicks)",
+      "siblings_render (session-list, viewer-count, back-to-browse, chat/follow)": true
+    },
+    "dashboard_live": {
+      "hls-player_present": true,
+      "iframe_src": "https://lvpr.tv/?v=0740whyn4tew0f9c&autoplay=1&muted=1&lowLatency=true"
+    },
+    "dashboard_offline": {
+      "hls-player-offline_present": true,
+      "no_iframe_rendered": true
+    },
+    "sessions_vod": {
+      "recorded_sessions_available": 0,
+      "note": "No VOD entries exist for testdj, so runtime click-through could not be executed. Code inspection of SessionList.jsx confirms it renders <HlsPlayer playbackId={selected.playback_id} isLive={true} muted={false} autoPlay /> — the resulting iframe src will start with https://lvpr.tv/?v=... per HlsPlayer logic. Recommend seeding one session for future automated coverage."
+    }
+  },
+  "console_errors_observed": "The lvpr.tv iframe internally logs manifestParsingError + 'Stream open failed' because no RTMP is actually being pushed to the Livepeer playback_id. These originate from Livepeer's player, not our app, and are expected in a synthetic 'is_live=true in DB but no real broadcast' test scenario.",
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "HlsPlayer.jsx correctly guards offline state (!playbackId || !isLive) and builds src via URLSearchParams — safe against injection.",
+    "SessionList passes isLive={true} to HlsPlayer for VODs which is a slight semantic mismatch (VOD isn't 'live') but functionally correct since the guard only checks isLive to differentiate from offline poster. Consider renaming the prop to 'ready' or adding a separate 'mode' prop for clarity.",
+    "Dashboard.jsx lines 184-188 have redundant ternary — both branches call HlsPlayer with the same playbackId, differing only by isLive. Could be simplified to <HlsPlayer playbackId={channel.playback_id} isLive={channel.is_live} />.",
+    "iframe allow attribute triggers a browser warning 'Allow attribute will take precedence over allowfullscreen' — harmless but the allowFullScreen prop is now redundant since 'fullscreen' is included in allow. Optional cleanup."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not tested (per request)", "frontend": "100%"},
+  "test_credentials": "testdj@pirate.radio / testpass123 (used successfully)",
+  "seed_data_creation": "None. Flipped channels.is_live to true and reset to false via mongosh as instructed.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "HlsPlayer swap to lvpr.tv iframe is verified working. DB state for testdj is is_live:false (reset). If future VOD testing is needed, seed a sessions row for testdj with a valid playback_id. Backend was intentionally not retested; iteration_3 report covers it.",
+  "rca of the issue": "Previous native <video> tag could not play HLS in non-Safari browsers without hls.js, resulting in an unresponsive/unclickable player. The fix delegates playback to Livepeer's hosted iframe (lvpr.tv) which handles HLS decoding, autoplay policy, and browser compatibility. Offline state now short-circuits to a poster instead of an empty <video>, eliminating the 'unclickable container' UX. Verified: iframe is the top element at its center point, i.e., no CSS overlay steals pointer events."
+}

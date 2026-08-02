@@ -1,0 +1,44 @@
+{
+  "summary": "Frontend-only smoke + feature testing for Iteration 6 (brand rename PIRATE.RADIO → SPARKZ.TV and new LiveSidebar). All 9 acceptance criteria verified via Playwright against the preview URL as user sidebar_fb6144@sparkz.tv. Every criterion passes with one caveat: the browser document.title is overridden at runtime by the injected emergent-main.js analytics script (renders as 'Emergent | Fullstack App'), even though the source <title> in /app/frontend/public/index.html is correctly set to 'Sparkz.TV — Underground Live Streaming'. This is external to app code and cannot be fixed from the frontend.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_results": {
+    "brand_logo_text": "SPARKZ.TV — PASS",
+    "footer_copyright": "© SPARKZ.TV — BROADCASTING FROM SOMEWHERE — PASS",
+    "html_title_source": "index.html <title> = 'Sparkz.TV — Underground Live Streaming' — PASS (source)",
+    "html_title_runtime": "document.title = 'Emergent | Fullstack App' — overridden by emergent-main.js (env, not app)",
+    "no_pirate_radio_leftover": "PASS — no PIRATE.RADIO text found anywhere on home",
+    "loggedout_sidebar_hidden": "PASS — sidebar count = 0 when logged out",
+    "loggedin_sidebar_desktop": "PASS — sidebar visible at 1440x900, width 240px",
+    "sidebar_channel_entries": "PASS — 2 entries: sidebar-channel-djsparkz, sidebar-channel-testdj (only followed+live)",
+    "sidebar_live_labels_and_dots": "PASS — LIVE labels rendered, 2 red .live-dot pulsing indicators",
+    "sidebar_toggle_collapse": "PASS — 240px → 56px; header '// FOLLOWED · LIVE' hidden when collapsed; ALL FOLLOWED footer link hidden when collapsed",
+    "sidebar_toggle_reexpand": "PASS — back to 240px",
+    "localStorage_persistence": "PASS — key 'sparkz_sidebar_collapsed' = '1' after collapse, '0' after expand; width remains 56px after full reload",
+    "main_content_offset_expanded": "PASS — main parent padding-left = 240px",
+    "main_content_offset_collapsed": "PASS — main parent padding-left = 56px",
+    "main_content_offset_mobile": "PASS — sidebar has 'hidden lg:flex', no offset applied below lg breakpoint",
+    "sidebar_click_navigation": "PASS — clicking sidebar-channel-djsparkz navigated to /channel/djsparkz",
+    "polling_15s": "Not directly waited (would require 15s+ interval); code review confirms setInterval(load, 15000) with proper cleanup — LOGIC OK"
+  },
+  "test_report_links": [],
+  "action_items": [
+    "OPTIONAL/INFO: Runtime document.title is overridden by the Emergent analytics script (emergent-main.js) to 'Emergent | Fullstack App'. The <title> in index.html source is correct. If the exact browser tab title matters, main agent may set document.title via a useEffect in App.js after mount to force it back to 'Sparkz.TV — Underground Live Streaming'."
+  ],
+  "critical_code_review_comments": [
+    "LiveSidebar.jsx polling uses setInterval(load, 15000) with cancelled flag + clearInterval on unmount — clean.",
+    "useSidebarCollapsed() polls localStorage every 300ms to sync same-tab writes. Works but a shared context/callback would be cleaner and avoid the 300ms delay between toggle and main-content padding update.",
+    "Sidebar uses 'hidden lg:flex' as intentional design; verified — no sidebar on mobile viewport as expected."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (skipped per request)", "frontend": "100% of listed criteria (title runtime is env-level, source is correct)"},
+  "test_credentials": "sidebar_fb6144@sparkz.tv / testpass123 (follows djsparkz, testdj — both is_live=true in Mongo for this iteration)",
+  "seed_data_creation": "None. Used existing seed. Note: main agent should reset testdj + djsparkz is_live=false after final acceptance per their own note.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Sidebar feature works end-to-end. Only environmental caveat is emergent-main.js overriding document.title. If iteration 7 modifies sidebar polling or backend /api/channels?following=true&live_only=true filter, re-test that endpoint's response shape (expects channel_id, username, display_name, category, photo_url, is_live=true)."
+}

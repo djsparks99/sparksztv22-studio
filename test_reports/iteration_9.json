@@ -1,0 +1,44 @@
+{
+  "summary": "Iteration 9 (Cloudflare 520 fix on /api/auth/login) fully verified. Backend: 11/11 pytest cases in /app/backend/tests/test_login_fix.py pass — valid login returns 200 with exact Content-Type 'application/json; charset=utf-8' and body {user, access_token, token_type='bearer'}; wrong password returns 401 with body {'error':'Invalid credentials'} and same Content-Type; unknown email returns identical 401 body (no account enumeration); missing password / empty body / non-JSON body all return 422 (or 400) with well-formed JSON — connection is NOT dropped; no app-level Set-Cookie header on login response (only Cloudflare-injected __cf_bm which is unavoidable at the proxy layer); CORS preflight OPTIONS returns valid headers with no spec-invalid ACAO=* + ACAC=true combo (with CORS_ORIGINS='*' env, allow_credentials is auto-forced to False by server.py:1142); global exception handler (invoked in-process) returns 500 with body {'error':'Internal server error'} and correct Content-Type. Regressions: /api/auth/me works, register duplicate email returns 409. Frontend (Playwright against preview URL): /login with wrong password shows toast text 'INVALID CREDENTIALS' (previously would have said 'Something went wrong'); /login with valid credentials redirects to /dashboard; /register with duplicate email shows toast 'EMAIL ALREADY REGISTERED'. apiErrorMessage() correctly handles both new {error} shape and legacy {detail} shape.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_results": {
+    "backend": {
+      "test_login_success_shape_and_content_type": "PASS",
+      "test_login_success_no_set_cookie": "PASS (only CF-injected __cf_bm cookie is present, filtered)",
+      "test_login_wrong_password_returns_401_error_shape": "PASS — body == {'error':'Invalid credentials'}",
+      "test_login_unknown_email_returns_401_same_message": "PASS — no account enumeration",
+      "test_login_missing_password_returns_422_valid_json": "PASS",
+      "test_login_empty_body_returns_422_valid_json": "PASS",
+      "test_login_non_json_body_returns_error_valid_response": "PASS",
+      "test_options_preflight_cors_no_wildcard_credentials": "PASS — ACAO=* with ACAC=true combo not present",
+      "test_me_endpoint_regression": "PASS",
+      "test_register_duplicate_email_error_shape": "PASS (409, legacy detail shape — expected)",
+      "test_global_exception_handler_returns_json_error": "PASS — 500 + {'error':'Internal server error'} + correct Content-Type"
+    },
+    "frontend": {
+      "login_wrong_password_shows_invalid_credentials_toast": "PASS — toast 'INVALID CREDENTIALS' rendered",
+      "login_valid_credentials_redirects_to_dashboard": "PASS — navigated to /dashboard",
+      "register_duplicate_email_shows_human_readable_toast": "PASS — toast 'EMAIL ALREADY REGISTERED' rendered"
+    }
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_login_fix.py",
+    "/app/test_reports/pytest/iter9_login.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py:1141-1142 CORS conditional is correct: only forces allow_credentials=False when the sole origin is '*'. If CORS_ORIGINS is set to a comma-list of explicit origins in production, credentials will be enabled — good.",
+    "server.py:1123 global exception handler is defined AFTER app.include_router(api) and BEFORE CORS middleware add — order is fine because @app.exception_handler is decorator-based (registered on app, not order-dependent). Verified: an unhandled RuntimeError produces JSONResponse(500, {'error':'Internal server error'}) with correct headers.",
+    "server.py:414-446 login() has nested try/except with granular error paths (db lookup, token creation, catch-all). Good defensive coding. Minor: the catch-all logs 'unexpected error' but returns 500 — consider distinguishing between validation-shaped errors and true 500s, but not blocking.",
+    "server.py:405-411 json_error helper is DRY and enforces Content-Type — good. Consider using it uniformly across other endpoints (currently register/me/etc still use HTTPException with 'detail' shape). Frontend apiErrorMessage() handles both so no user-facing bug, but consistency would be nice.",
+    "auth-context.js:34,45 correctly uses apiErrorMessage(e) — legacy formatApiErrorDetail is still exported from api.js but unused in auth flows; keep for other components that may still consume {detail}."
+  ],
+  "updated_files": ["/app/backend/tests/test_login_fix.py"],
+  "success_rate": {"backend": "100% (11/11)", "frontend": "100% (3/3 acceptance flows)"},
+  "test_credentials": "Ephemeral users registered via /api/auth/register each run (test_login_*@pirate.radio / testpass123 and test_fe_*@pirate.radio / testpass123). DJ SPARKZ (markysparks99@gmail.com) NOT touched. testdj@pirate.radio / testpass123 from prior iterations still valid.",
+  "seed_data_creation": "Two throwaway users per full test run (backend + frontend). No cleanup performed — matches spec ('incidental new test users are fine').",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 9 Cloudflare 520 fix fully green. Reusable pytest at /app/backend/tests/test_login_fix.py covers success/failure/malformed/CORS/global-handler paths and can be re-run any time. Key invariants to preserve across future edits: (1) all auth error paths must return JSONResponse with Content-Type 'application/json; charset=utf-8'; (2) new error body shape is {'error': '...'}; (3) frontend apiErrorMessage() in /app/frontend/src/lib/api.js reads both {error} (new) and {detail} (legacy FastAPI validation) — do not break either; (4) CORS logic in server.py:1141-1142 forces allow_credentials=False when CORS_ORIGINS='*' — if this changes, add explicit origins list. Frontend toast selectors: text-based 'INVALID CREDENTIALS' / 'EMAIL ALREADY REGISTERED' work; no dedicated data-testid on the toast component itself — consider adding data-testid='auth-toast' for future automation robustness."
+}

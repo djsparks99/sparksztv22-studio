@@ -1,0 +1,30 @@
+{
+  "summary": "Iteration 5 targeted bug-fix verification: (1) Homepage Browse.jsx polling picks up backend is_live flips within ~12s without a hard refresh, (2) filter chips (live-only, category) still work under the poll, (3) Dashboard CUT SIGNAL button correctly flips is_live=false + viewer_count=0 and swaps UI back to FORCE LIVE, (4) backend Livepeer webhook regression (test_new_features.py::TestNotifications) still passes. All four scenarios PASS.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_results": {
+    "homepage_poll_offline_to_live": "PASS — testdj card had 0 LIVE badges baseline; after stream.started webhook + 13s wait, LIVE badge appeared without navigation/refresh",
+    "homepage_poll_live_to_offline": "PASS — after stream.idle webhook + 13s wait, LIVE badge disappeared from testdj card without refresh",
+    "filter_regression_live_only": "PASS — with testdj live, LIVE-ONLY filter shows 2 cards including testdj",
+    "filter_regression_category": "PASS — category=music returns 11 cards; category=all restores full grid",
+    "dashboard_cut_signal": "PASS — clicked FORCE LIVE (channel went LIVE, ON AIR badge visible, CUT SIGNAL button appeared) then clicked CUT SIGNAL: FORCE LIVE button returned, ON AIR gone, OFF AIR shown, toast 'SIGNAL CUT.' displayed",
+    "dashboard_cut_signal_backend_state": "PASS — GET /api/channels/mine returned is_live=false, viewer_count=0 immediately after button click",
+    "webhook_regression_pytest": "PASS — backend/tests/test_new_features.py::TestNotifications (2 tests) passed in 2.47s"
+  },
+  "test_report_links": ["/app/backend/tests/test_new_features.py"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Browse.jsx polling implementation is clean: uses `initial` guard so the skeleton only shows on first fetch, and clearInterval + cancelled flag on unmount avoid state-update-on-unmounted-component warnings.",
+    "Poll interval (10s) is reasonable; when the user filters, the effect re-subscribes and the very next tick uses the fresh params — verified in filter regression.",
+    "Dashboard.jsx already has its own 8s poll for auto-detect, so operator UI also self-heals when webhook flips state — good.",
+    "Minor: Browse.jsx polls unconditionally even when the tab is hidden. Consider `document.visibilityState === 'visible'` gate to save unnecessary requests on backgrounded tabs (optional optimization, not a bug)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (webhook regression, 2/2)", "frontend": "100% (all 4 assertion groups pass)"},
+  "test_credentials": "testdj@pirate.radio / testpass123 — used successfully",
+  "seed_data_creation": "None. testdj is_live was flipped LIVE/OFFLINE several times via signed webhook + button clicks during the test. Final DB state confirmed via API: is_live=false, viewer_count=0.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Bug fix verified end-to-end. Homepage polling works, filters unaffected, CUT SIGNAL button both updates UI and DB. If future changes to Browse.jsx polling, keep the initial-load skeleton guard and cancelled cleanup; those prevent flicker and memory leaks respectively.",
+  "rca of the issue": "Original bug: card visually stuck as LIVE after OBS stops streaming even though backend correctly flipped is_live=false via Livepeer webhook. RCA: Homepage Browse.jsx fetched /api/channels only on mount — no polling — so it never observed subsequent backend flips. Reproduction path was: view homepage → backend flips is_live → homepage still shows LIVE until manual reload. Fix (in Browse.jsx): added setInterval(load, 10000) alongside the initial load, with an `initial` guard to prevent the skeleton from re-showing, and a cancelled/clearInterval cleanup on unmount. Verified: 13s after a stream.started webhook, the LIVE badge appears; 13s after stream.idle, it disappears — all without navigation."
+}

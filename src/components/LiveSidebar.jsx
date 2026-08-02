@@ -1,0 +1,634 @@
+import { useEffect, useState, useMemo } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { api, fileUrl } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
+import { db } from "@/lib/firebase";
+import { collection, onSnapshot } from "firebase/firestore";
+import { ChevronLeft, ChevronRight, User, Radio, Bell, BellOff, Tv, Calendar, Heart, ChevronDown, ChevronUp } from "lucide-react";
+import { toast } from "sonner";
+
+const STORAGE_KEY = "sparkz_sidebar_collapsed";
+const CHIMES_KEY = "sparkz_chime_reminders";
+const SHOW_OFFLINE_KEY = "sparkz_sidebar_show_offline";
+const DUMMY_USERNAMES = ["pirate_fm", "acid_vault", "dub_station"];
+
+function isDocId(str) {
+  if (!str || typeof str !== "string") return false;
+  const trimmed = str.trim();
+  return (
+    trimmed.length >= 20 &&
+    /^[A-Za-z0-9_-]+$/.test(trimmed) &&
+    /[0-9]/.test(trimmed) &&
+    /[A-Z]/.test(trimmed)
+  );
+}
+
+function isValidString(str) {
+  if (!str || typeof str !== "string") return false;
+  const trimmed = str.trim();
+  if (!trimmed) return false;
+  const lower = trimmed.toLowerCase();
+  if (
+    lower === "undefined" ||
+    lower === "null" ||
+    lower === "channel" ||
+    isDocId(trimmed)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function cleanString(str) {
+  if (!isValidString(str)) return null;
+  return str.trim();
+}
+
+function isValidChannel(c) {
+  if (!c || typeof c !== "object") return false;
+  const validUname = isValidString(c.username);
+  const validDname = isValidString(c.display_name);
+  return validUname || validDname;
+}
+
+function getNormalizedKey(data, docId) {
+  const uname = cleanString(data?.username);
+  if (uname) return uname.toLowerCase();
+
+  const chanId = cleanString(data?.channel_id);
+  if (chanId) return chanId.toLowerCase();
+
+  const id = cleanString(docId || data?.id);
+  if (id) return id.toLowerCase();
+
+  return "djsparkz";
+}
+
+function getDisplayName(c) {
+  const dName = cleanString(c?.display_name);
+  if (dName) return dName;
+
+  const uName = cleanString(c?.username);
+  if (uName) return uName;
+
+  const cId = cleanString(c?.channel_id);
+  if (cId) return cId;
+
+  return "";
+}
+
+function getTargetUsername(c) {
+  const uName = cleanString(c?.username);
+  if (uName) return uName;
+
+  const dName = cleanString(c?.display_name);
+  if (dName) return dName;
+
+  const cId = cleanString(c?.channel_id);
+  if (cId) return cId;
+
+  return "djsparkz";
+}
+
+export default function LiveSidebar() {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const [channels, setChannels] = useState([]);
+  const [followingList, setFollowingList] = useState([]);
+  const [showOffline, setShowOffline] = useState(() => {
+    try {
+      return localStorage.getItem(SHOW_OFFLINE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const [collapsed, setCollapsed] = useState(
+    () => typeof window !== "undefined" && localStorage.getItem(STORAGE_KEY) === "1"
+  );
+  const [loaded, setLoaded] = useState(false);
+
+  // Store active chimes by username
+  const [chimes, setChimes] = useState(() => {
+    try {
+      const saved = localStorage.getItem(CHIMES_KEY);
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const toggleChime = (username, displayName, e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const normUser = username.toLowerCase();
+    const nextState = !chimes[normUser];
+
+    const updated = { ...chimes, [normUser]: nextState };
+    setChimes(updated);
+
+    try {
+      localStorage.setItem(CHIMES_KEY, JSON.stringify(updated));
+    } catch {
+      // ignore
+    }
+
+    if (nextState) {
+      toast.success(`Chime set! You will be notified when @${username} goes live.`, {
+        description: `Green room reminder active for ${displayName || username}.`,
+        icon: "🔔",
+      });
+    } else {
+      toast.info(`Chime reminder removed for @${username}.`);
+    }
+  };
+
+  const toggleShowOffline = () => {
+    const next = !showOffline;
+    setShowOffline(next);
+    try {
+      localStorage.setItem(SHOW_OFFLINE_KEY, next ? "1" : "0");
+    } catch {
+      // ignore
+    }
+  };
+
+  // Fetch following list for current user with auto-sync and event listener
+  useEffect(() => {
+    if (!user) {
+      setFollowingList([]);
+      return;
+    }
+
+    let cancelled = false;
+
+    const fetchFollowing = () => {
+      api
+        .get("/users/mine/following")
+        .then(({ data }) => {
+          if (!cancelled && data && Array.isArray(data.following)) {
+            setFollowingList(data.following.map((u) => u.toLowerCase()));
+          }
+        })
+        .catch(() => {});
+    };
+
+    fetchFollowing();
+
+    const handleFollowChange = () => {
+      fetchFollowing();
+    };
+
+    window.addEventListener("follow-changed", handleFollowChange);
+    window.addEventListener("focus", handleFollowChange);
+    const interval = setInterval(fetchFollowing, 3000);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener("follow-changed", handleFollowChange);
+      window.removeEventListener("focus", handleFollowChange);
+      clearInterval(interval);
+    };
+  }, [user]);
+
+  // Set of usernames user is following
+  const followedSet = useMemo(() => {
+    return new Set(followingList.map((u) => u.toLowerCase()));
+  }, [followingList]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    // Fetch initial channel list from API first
+    api
+      .get("/channels")
+      .then(({ data }) => {
+        if (cancelled) return;
+        const rawList = Array.isArray(data) ? data : [];
+        const map = new Map();
+
+        rawList.forEach((c) => {
+          if (!isValidChannel(c)) return;
+          const normKey = getNormalizedKey(c, c.channel_id || c.id);
+          if (DUMMY_USERNAMES.includes(normKey) || c.is_dummy) return;
+
+          map.set(normKey, c);
+        });
+
+        setChannels(Array.from(map.values()));
+        setLoaded(true);
+      })
+      .catch(() => {
+        if (!cancelled) setLoaded(true);
+      });
+
+    // Subscribe to Firestore for real-time live & schedule updates
+    const q = collection(db, "channels");
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        if (cancelled) return;
+
+        setChannels((prev) => {
+          const map = new Map();
+
+          // Load previous state
+          prev.forEach((c) => {
+            const key = getNormalizedKey(c, c.id);
+            if (!DUMMY_USERNAMES.includes(key) && !c.is_dummy) {
+              map.set(key, c);
+            }
+          });
+
+          // Overlay real-time snapshot
+          snapshot.forEach((docSnap) => {
+            const data = docSnap.data();
+            if (!data) return;
+
+            const merged = { id: docSnap.id, ...data };
+            if (!isValidChannel(merged)) return;
+
+            const normKey = getNormalizedKey(data, docSnap.id);
+            if (DUMMY_USERNAMES.includes(normKey) || data.is_dummy) return;
+
+            const existing = map.get(normKey) || {};
+            map.set(normKey, {
+              ...existing,
+              ...merged,
+              is_live: Boolean(data.is_live ?? data.isLive ?? existing.is_live),
+              viewer_count: data.viewer_count ?? existing.viewer_count ?? 0,
+              stream_title: data.stream_title || existing.stream_title,
+              category: data.category || existing.category,
+              schedule: data.schedule || existing.schedule,
+            });
+          });
+
+          return Array.from(map.values()).filter(isValidChannel);
+        });
+
+        setLoaded(true);
+      },
+      (err) => {
+        console.warn("Sidebar Firestore sync notice:", err);
+        setLoaded(true);
+      }
+    );
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [user]);
+
+  const toggle = () => {
+    const next = !collapsed;
+    setCollapsed(next);
+    try {
+      localStorage.setItem(STORAGE_KEY, next ? "1" : "0");
+    } catch {
+      // ignore
+    }
+  };
+
+  // Filter out dummy channels & deduplicate
+  const safeChannels = (Array.isArray(channels) ? channels : []).filter((c) => {
+    if (!isValidChannel(c)) return false;
+    const norm = getNormalizedKey(c, c.id);
+    return !DUMMY_USERNAMES.includes(norm) && !c.is_dummy;
+  });
+
+  // Strictly enforce FOLLOWED CHANNELS rule: Only include channels the user explicitly follows
+  const visibleChannels = safeChannels.filter((c) => {
+    if (!user) return false;
+    const targetUname = getTargetUsername(c).toLowerCase();
+    return followedSet.has(targetUname);
+  });
+
+  // Separate into Live, Scheduled, and Offline Followed Channels
+  const liveChannels = visibleChannels.filter((c) => Boolean(c.is_live || c.isLive));
+  const upcomingChannels = visibleChannels.filter(
+    (c) => !Boolean(c.is_live || c.isLive) && Array.isArray(c.schedule) && c.schedule.length > 0
+  );
+  const offlineChannels = visibleChannels.filter(
+    (c) => !Boolean(c.is_live || c.isLive) && (!Array.isArray(c.schedule) || c.schedule.length === 0)
+  );
+
+  return (
+    <aside
+      data-testid="live-sidebar"
+      className={`fixed left-0 top-[calc(4rem+var(--ticker-height,37px))] z-30 hidden h-[calc(100vh-4rem-var(--ticker-height,37px))] flex-col border-r border-[#27272a] bg-[#050505] lg:flex ${
+        collapsed ? "w-[60px]" : "w-[240px]"
+      } transition-[width,top,height] duration-150`}
+    >
+      <header className="flex flex-col border-b border-[#27272a] px-3 py-2.5 gap-1.5">
+        <div className="flex items-center justify-between">
+          {!collapsed && (
+            <div className="flex items-center gap-1.5">
+              <Heart className="h-3.5 w-3.5 text-[#e5ff00] fill-current" />
+              <div className="label-caps mb-0 truncate">// FOLLOWED CHANNELS</div>
+            </div>
+          )}
+          <button
+            data-testid="sidebar-toggle"
+            onClick={toggle}
+            className="flex h-7 w-7 flex-shrink-0 items-center justify-center border border-[#27272a] text-zinc-400 transition-colors hover:border-white hover:text-white"
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {collapsed ? (
+              <ChevronRight className="h-3.5 w-3.5" />
+            ) : (
+              <ChevronLeft className="h-3.5 w-3.5" />
+            )}
+          </button>
+        </div>
+      </header>
+
+      <div className="flex-1 overflow-y-auto divide-y divide-[#27272a]/40">
+        {!loaded ? (
+          <div className="p-3 space-y-2">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <div className="h-8 w-8 flex-shrink-0 animate-pulse bg-[#111]" />
+                {!collapsed && <div className="h-3 flex-1 animate-pulse bg-[#111]" />}
+              </div>
+            ))}
+          </div>
+        ) : visibleChannels.length === 0 ? (
+          <EmptyState
+            collapsed={collapsed}
+            isLoggedIn={Boolean(user)}
+          />
+        ) : (
+          <>
+            {/* LIVE CHANNELS SECTION */}
+            {liveChannels.length > 0 && (
+              <div>
+                {!collapsed && (
+                  <div className="px-3 pt-3 pb-1.5 flex items-center justify-between font-mono text-[9px] font-bold uppercase tracking-widest text-[#e5ff00]">
+                    <span className="flex items-center gap-1">
+                      <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
+                      LIVE NOW ({liveChannels.length})
+                    </span>
+                  </div>
+                )}
+                <ul>
+                  {liveChannels.map((c) => (
+                    <SidebarBroadcasterItem
+                      key={getNormalizedKey(c, c.id)}
+                      channel={c}
+                      collapsed={collapsed}
+                      isChimed={Boolean(chimes[getTargetUsername(c).toLowerCase()])}
+                      onToggleChime={toggleChime}
+                      navigate={navigate}
+                    />
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* UPCOMING / SCHEDULED SECTION */}
+            {upcomingChannels.length > 0 && (
+              <div>
+                {!collapsed && (
+                  <div className="px-3 pt-3 pb-1.5 flex items-center justify-between font-mono text-[9px] font-bold uppercase tracking-widest text-zinc-400">
+                    <span className="flex items-center gap-1">
+                      <Calendar className="h-3 w-3 text-[#e5ff00]" />
+                      SCHEDULED ({upcomingChannels.length})
+                    </span>
+                  </div>
+                )}
+                <ul>
+                  {upcomingChannels.map((c) => (
+                    <SidebarBroadcasterItem
+                      key={getNormalizedKey(c, c.id)}
+                      channel={c}
+                      collapsed={collapsed}
+                      isChimed={Boolean(chimes[getTargetUsername(c).toLowerCase()])}
+                      onToggleChime={toggleChime}
+                      navigate={navigate}
+                    />
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* OFFLINE FOLLOWED CHANNELS SECTION (Collapsible to keep sidebar clutter-free) */}
+            {offlineChannels.length > 0 && (
+              <div>
+                {!collapsed && (
+                  <button
+                    type="button"
+                    onClick={toggleShowOffline}
+                    className="w-full px-3 py-2 flex items-center justify-between font-mono text-[9px] font-bold uppercase tracking-widest text-zinc-500 hover:text-zinc-300 transition-colors border-t border-[#27272a]/40 bg-[#080808]"
+                  >
+                    <span>OFFLINE FOLLOWED ({offlineChannels.length})</span>
+                    {showOffline ? (
+                      <ChevronUp className="h-3 w-3" />
+                    ) : (
+                      <ChevronDown className="h-3 w-3" />
+                    )}
+                  </button>
+                )}
+                {(showOffline || collapsed) && (
+                  <ul>
+                    {offlineChannels.map((c) => (
+                      <SidebarBroadcasterItem
+                        key={getNormalizedKey(c, c.id)}
+                        channel={c}
+                        collapsed={collapsed}
+                        isChimed={Boolean(chimes[getTargetUsername(c).toLowerCase()])}
+                        onToggleChime={toggleChime}
+                        navigate={navigate}
+                      />
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {!collapsed && (
+        <footer className="border-t border-[#27272a] px-3 py-3 flex items-center justify-between bg-[#080808]">
+          <Link
+            to="/directory"
+            data-testid="sidebar-see-all"
+            className="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-zinc-400 hover:text-[#e5ff00] transition-colors"
+          >
+            <Radio className="h-3 w-3 text-[#e5ff00]" /> // BROWSE ALL DIRECTORY
+          </Link>
+        </footer>
+      )}
+    </aside>
+  );
+}
+
+function SidebarBroadcasterItem({ channel, collapsed, isChimed, onToggleChime, navigate }) {
+  const isLive = Boolean(channel.is_live || channel.isLive);
+  const hasSchedule = Array.isArray(channel.schedule) && channel.schedule.length > 0;
+  const targetUsername = getTargetUsername(channel);
+  const displayName = getDisplayName(channel);
+  const nextSet = hasSchedule ? channel.schedule[0] : null;
+
+  // NEON STORY RING STYLING:
+  // - Live: Glowing animated neon yellow & red gradient ring
+  // - Scheduled/Upcoming: Bright electric neon yellow ring
+  // - Offline: Subtle dark zinc ring
+  const ringStyle = isLive
+    ? "p-[2px] rounded-full bg-gradient-to-tr from-[#e5ff00] via-red-500 to-[#e5ff00] animate-pulse shadow-[0_0_12px_rgba(229,255,0,0.7)]"
+    : hasSchedule
+    ? "p-[2px] rounded-full bg-gradient-to-tr from-[#e5ff00] to-yellow-300 shadow-[0_0_8px_rgba(229,255,0,0.5)]"
+    : "p-[1px] rounded-full bg-[#27272a]";
+
+  return (
+    <li>
+      <div
+        className="group relative flex items-center justify-between border-b border-[#27272a]/60 px-2.5 py-2 transition-all hover:bg-[#0f0f0f]"
+        data-testid={`sidebar-broadcaster-${targetUsername}`}
+      >
+        <Link
+          to={`/channel/${targetUsername}`}
+          title={`${displayName} (@${targetUsername}) ${isLive ? '— LIVE NOW' : hasSchedule ? '— SCHEDULED SET' : ''}`}
+          className="flex items-center gap-2.5 min-w-0 flex-1"
+        >
+          {/* Avatar with DJ Twist Neon Story Ring */}
+          <div className="relative flex-shrink-0">
+            <div className={ringStyle}>
+              {channel.photo_url ? (
+                <img
+                  src={fileUrl(channel.photo_url)}
+                  alt={displayName}
+                  className="h-8 w-8 rounded-full border border-black object-cover grayscale group-hover:grayscale-0 transition-all"
+                />
+              ) : (
+                <div className="flex h-8 w-8 items-center justify-center rounded-full border border-black bg-black">
+                  <User className="h-4 w-4 text-zinc-400" />
+                </div>
+              )}
+            </div>
+
+            {/* Small live badge indicator dot */}
+            {isLive && (
+              <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-black bg-red-500" />
+            )}
+          </div>
+
+          {!collapsed && (
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-1">
+                <span className="truncate font-mono text-[11px] font-bold uppercase tracking-wider text-white group-hover:text-[#e5ff00] transition-colors">
+                  {displayName}
+                </span>
+                {isLive ? (
+                  <span className="font-mono text-[9px] font-bold text-red-500 animate-pulse">
+                    LIVE
+                  </span>
+                ) : hasSchedule ? (
+                  <span className="font-mono text-[8px] uppercase tracking-wider text-[#e5ff00] border border-[#e5ff00]/40 px-1 py-0.2">
+                    {nextSet.day}
+                  </span>
+                ) : null}
+              </div>
+
+              <div className="mt-0.5 flex items-center justify-between font-mono text-[10px] text-zinc-400">
+                <span className="truncate text-zinc-500">
+                  {isLive && channel.stream_title
+                    ? channel.stream_title
+                    : hasSchedule && nextSet
+                    ? nextSet.title
+                    : channel.category || "music"}
+                </span>
+              </div>
+            </div>
+          )}
+        </Link>
+
+        {/* Chime & Green Room Action Buttons */}
+        {!collapsed && (
+          <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity ml-1.5 flex-shrink-0">
+            {/* Chime Reminder Button */}
+            <button
+              type="button"
+              onClick={(e) => onToggleChime(targetUsername, displayName, e)}
+              className={`p-1 transition-colors ${
+                isChimed
+                  ? "text-[#e5ff00] hover:text-white"
+                  : "text-zinc-600 hover:text-white"
+              }`}
+              title={isChimed ? "Chime Active — Click to remove" : "Set Chime Reminder for Green Room live alert"}
+              aria-label="Set Chime Reminder"
+              data-testid={`chime-btn-${targetUsername}`}
+            >
+              {isChimed ? <Bell className="h-3.5 w-3.5 fill-[#e5ff00]" /> : <BellOff className="h-3 w-3" />}
+            </button>
+
+            {/* Enter Green Room / Channel Button */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                navigate(`/channel/${targetUsername}`);
+              }}
+              className="p-1 text-zinc-600 hover:text-[#e5ff00] transition-colors"
+              title="Enter Green Room / Channel"
+              aria-label="Enter Green Room"
+              data-testid={`greenroom-btn-${targetUsername}`}
+            >
+              <Tv className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+      </div>
+    </li>
+  );
+}
+
+function EmptyState({ collapsed, isLoggedIn }) {
+  if (collapsed) {
+    return (
+      <div className="flex flex-col items-center gap-2 px-2 py-6 text-center">
+        <Radio className="h-4 w-4 text-zinc-700" />
+      </div>
+    );
+  }
+
+  if (!isLoggedIn) {
+    return (
+      <div className="px-4 py-8 text-center">
+        <Heart className="mx-auto h-5 w-5 text-zinc-600" />
+        <div className="mt-3 font-mono text-[10px] uppercase tracking-widest text-zinc-400 font-bold">
+          // SIGN IN FOR FOLLOWS
+        </div>
+        <p className="mt-2 font-mono text-[10px] leading-relaxed text-zinc-500">
+          Sign in to follow broadcasters and see their live status, neon story rings, & chime reminders.
+        </p>
+        <Link
+          to="/login"
+          className="mt-4 inline-block border border-[#27272a] bg-[#111] px-3 py-1.5 font-mono text-[9px] font-bold uppercase tracking-widest text-[#e5ff00] hover:border-[#e5ff00] transition-colors"
+        >
+          SIGN IN / REGISTER
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <div className="px-4 py-8 text-center">
+      <Heart className="mx-auto h-5 w-5 text-zinc-600" />
+      <div className="mt-3 font-mono text-[10px] uppercase tracking-widest text-zinc-500 font-bold">
+        // NO FOLLOWED CHANNELS YET
+      </div>
+      <p className="mt-2 font-mono text-[10px] leading-relaxed text-zinc-600">
+        Follow your favorite DJs from the Directory or Channel pages to customize your live green room sidebar.
+      </p>
+      <Link
+        to="/directory"
+        className="mt-4 inline-block border border-[#27272a] bg-[#111] px-3 py-1.5 font-mono text-[9px] font-bold uppercase tracking-widest text-[#e5ff00] hover:border-[#e5ff00] transition-colors"
+      >
+        BROWSE BROADCASTER DIRECTORY
+      </Link>
+    </div>
+  );
+}

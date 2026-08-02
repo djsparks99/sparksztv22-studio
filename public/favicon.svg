@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Vinyl Disc Gradient -->
+    <radialGradient id="discGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#1c1c20" />
+      <stop offset="60%" stop-color="#0c0c0e" />
+      <stop offset="100%" stop-color="#050507" />
+    </radialGradient>
+
+    <!-- Center Label Neon Yellow Gradient -->
+    <linearGradient id="labelGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f0ff33" />
+      <stop offset="100%" stop-color="#cbe600" />
+    </linearGradient>
+
+    <!-- Shiny Vinyl Light Reflection -->
+    <linearGradient id="shineGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.18" />
+      <stop offset="35%" stop-color="#ffffff" stop-opacity="0.02" />
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0" />
+    </linearGradient>
+
+    <linearGradient id="shineGrad2" x1="100%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.15" />
+      <stop offset="40%" stop-color="#ffffff" stop-opacity="0.02" />
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0" />
+    </linearGradient>
+  </defs>
+
+  <!-- Outer Shadow Disc Base -->
+  <circle cx="256" cy="256" r="248" fill="url(#discGrad)" stroke="#27272a" stroke-width="4" />
+
+  <!-- Concentric Sound Grooves -->
+  <circle cx="256" cy="256" r="230" fill="none" stroke="#222227" stroke-width="2.5" opacity="0.8" />
+  <circle cx="256" cy="256" r="212" fill="none" stroke="#18181c" stroke-width="3" opacity="0.9" />
+  <circle cx="256" cy="256" r="194" fill="none" stroke="#2a2a30" stroke-width="2" opacity="0.7" />
+  <circle cx="256" cy="256" r="176" fill="none" stroke="#1f1f24" stroke-width="2.5" opacity="0.8" />
+  <circle cx="256" cy="256" r="158" fill="none" stroke="#2c2c34" stroke-width="1.8" opacity="0.6" />
+  <circle cx="256" cy="256" r="140" fill="none" stroke="#1a1a1e" stroke-width="3" opacity="0.9" />
+  <circle cx="256" cy="256" r="122" fill="none" stroke="#24242a" stroke-width="2" opacity="0.7" />
+
+  <!-- Sheen Reflection Wedges -->
+  <path d="M 256 256 L 60 60 A 248 248 0 0 1 452 60 Z" fill="url(#shineGrad1)" />
+  <path d="M 256 256 L 452 452 A 248 248 0 0 1 60 452 Z" fill="url(#shineGrad2)" />
+
+  <!-- Center Label Outer Ring -->
+  <circle cx="256" cy="256" r="92" fill="#000000" stroke="#e5ff00" stroke-width="3" />
+
+  <!-- Center Record Label -->
+  <circle cx="256" cy="256" r="84" fill="url(#labelGrad)" />
+
+  <!-- Center Label Inner Branding Ring & Design -->
+  <circle cx="256" cy="256" r="72" fill="none" stroke="#111111" stroke-width="1.5" stroke-dasharray="4 3" opacity="0.6" />
+
+  <!-- Lightning Bolt Icon in Center Label -->
+  <path d="M 262 206 L 238 250 L 254 250 L 244 294 L 278 246 L 258 246 Z" fill="#050505" />
+
+  <!-- Center Spindle Hole Rim -->
+  <circle cx="256" cy="256" r="22" fill="#050505" stroke="#111111" stroke-width="2" />
+  <circle cx="256" cy="256" r="16" fill="#0d0d0f" />
+</svg>

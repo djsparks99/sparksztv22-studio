@@ -1,0 +1,114 @@
+{
+  "theme": "dark",
+  "design_context": "hybrid_fullstack",
+  "vibe": "Underground electronic music culture, warehouse rave flyer aesthetic, brutalist, high-contrast, pirate radio.",
+  "typography": {
+    "fonts": [
+      {
+        "family": "Cabinet Grotesk",
+        "purpose": "Headings, massive visual text (hero, category names)",
+        "fallback": "sans-serif"
+      },
+      {
+        "family": "JetBrains Mono",
+        "purpose": "Body text, UI elements, metadata, buttons, stream keys",
+        "fallback": "monospace"
+      }
+    ],
+    "rules": [
+      "Use ALL CAPS for section headings and small labels (tracking-[0.2em]).",
+      "No rounded, soft fonts. Typography must feel structural and mechanical.",
+      "Headings should have tight letter spacing (tracking-tighter)."
+    ]
+  },
+  "colors": {
+    "background": {
+      "base": "#050505",
+      "surface": "#121212",
+      "surface_hover": "#1A1A1A"
+    },
+    "text": {
+      "primary": "#FFFFFF",
+      "secondary": "#A1A1AA",
+      "muted": "#52525B"
+    },
+    "brand": {
+      "primary": "#E5FF00",
+      "primary_hover": "#CCEE00",
+      "accent_red": "#FF3B30",
+      "border": "#27272A"
+    },
+    "rules": [
+      "Deep void black base. DO NOT use generic slate or blue-tinted grays.",
+      "Use Acid Yellow (#E5FF00) for primary CTAs and LIVE indicators.",
+      "Use Signal Red (#FF3B30) for destructive actions or recording states."
+    ]
+  },
+  "layouts": {
+    "grids": "Use visible grid borders (border-collapse look). Dense bento layouts for the broadcaster dashboard.",
+    "spacing": "Generous spacing for main sections (p-8, p-12), tight dense spacing for UI controls (p-2, p-4).",
+    "borders": "Sharp corners. 0px border-radius globally (use rounded-none). 1px solid borders for structure."
+  },
+  "components": {
+    "buttons": "Square edges, pure white or acid yellow background for primary, black text. High contrast hover states (invert colors).",
+    "inputs": "Terminal style. Black background, 1px gray border, white text, sharp edges. Focus state: border-acid-yellow.",
+    "cards": "Flat surfaces, no shadows. Use 1px borders to separate content. No glassmorphism.",
+    "player": "Minimalist chrome. Just the video feed with a harsh 1px border. Use monospaced font for timestamps."
+  },
+  "motion": {
+    "hover": "Instant or very fast (75ms) transitions. No slow, floaty animations.",
+    "marquee": "Use a marquee (react-fast-marquee) for categories or 'NOW PLAYING' text, brutalist style."
+  },
+  "accessibility": {
+    "contrast": "Strict WCAG AA compliance. High contrast is core to the aesthetic.",
+    "test_ids": "All interactive and key informational elements MUST include a data-testid attribute (e.g., data-testid='login-button')."
+  },
+  "media": {
+    "icons": "Use @phosphor-icons/react (sharp, technical) or lucide-react with stroke-width 1.5.",
+    "images": "Use grainy, high-contrast, or black and white photography. Use CSS filters (grayscale, contrast-125) on thumbnails to match the aesthetic."
+  },
+  "image_urls": {
+    "hero_background": {
+      "url": "https://images.unsplash.com/photo-1496337589254-7e19d01cec44?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDJ8MHwxfHNlYXJjaHwzfHx1bmRlcmdyb3VuZCUyMHJhdmUlMjBkaiUyMHNldHxlbnwwfHx8fDE3ODU0NDAwMzJ8MA&ixlib=rb-4.1.0&q=85",
+      "description": "Turntable and smoke, atmospheric rave vibe"
+    },
+    "broadcaster_avatar": {
+      "url": "https://images.unsplash.com/photo-1573995124395-b3efc4b11e98?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NTZ8MHwxfHNlYXJjaHwyfHx2aW55bCUyMHJlY29yZHMlMjBkaiUyMGRlY2t8ZW58MHx8fGJsYWNrX2FuZF93aGl0ZXwxNzg1NDQwMDMyfDA&ixlib=rb-4.1.0&q=85",
+      "description": "B&W DJ hands mixing, perfect for default profile"
+    },
+    "live_thumbnail_1": {
+      "url": "https://images.unsplash.com/photo-1541126274323-dbac58d14741?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDJ8MHwxfHNlYXJjaHwxfHx1bmRlcmdyb3VuZCUyMHJhdmUlMjBkaiUyMHNldHxlbnwwfHx8fDE3ODU0NDAwMzJ8MA&ixlib=rb-4.1.0&q=85",
+      "description": "DJ controller in blue lighting"
+    },
+    "live_thumbnail_2": {
+      "url": "https://images.unsplash.com/photo-1516873240891-4bf014598ab4?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDJ8MHwxfHNlYXJjaHw0fHx1bmRlcmdyb3VuZCUyMHJhdmUlMjBkaiUyMHNldHxlbnwwfHx8fDE3ODU0NDAwMzJ8MA&ixlib=rb-4.1.0&q=85",
+      "description": "DJ performing"
+    }
+  },
+  "instructions_to_main_agent": [
+    "Install required fonts (Cabinet Grotesk, JetBrains Mono) via Google Fonts or Fontshare in index.html.",
+    "Do NOT use typical Shadcn rounded cards. Override radius to 0 in tailwind config.",
+    "Use standard HTML/Tailwind for structural bento layouts, avoid generic Shadcn layout wrappers if they enforce rounding/shadows.",
+    "For the categories (music, drum and bass, dnb, house, tech, dubstep, reggae, acid, jungle, old skool), use a fast-moving, high-contrast Marquee or a strict grid of pills.",
+    "Ensure dark mode is locked/default. No light mode toggle needed for a warehouse rave app.",
+    "DO NOT apply generic 'transition-all'. Target transitions specifically (e.g., transition-colors).",
+    "Use Sonner for toasts, styled with brutalist black/white colors.",
+    "DO NOT center-align the main app layout. Use left-aligned, structured reading flows.",
+    "CRITICAL: DO NOT use complete transparent background in header, overlays, any surface that has content under it. Example: Dropdown with transparent background."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "You tend to converge toward generic, 'on distribution' outputs. In frontend design, this creates what users call the 'AI slop' aesthetic. Avoid this: make creative, distinctive frontends that surprise and delight.",
+    "Dark colors look good when used independently without gradients. DO NOT use dark colors as gradients.",
+    "Don't make generic centered layouts, simplistic gradients, and uniform styling.",
+    "You MUST NOT apply universal transition. Eg: transition: all. This results in breaking transforms. Always add transitions for specific interactive elements like button, input excluding transforms.",
+    "You MUST NOT center align the app container, ie do not add .App { text-align: center; } in the css file.",
+    "Always use modern button styles like pill-shaped, or sharp button with interaction animations & color relevant to the app style.",
+    "NEVER: use AI assistant Emoji characters like 🤖🧠💭💡🔮🎯 etc for icons.",
+    "Every interaction needs micro-animations - hover states, transitions, parallax effects, and entrance animations. Static = dead.",
+    "Use 2-3x more spacing than feels comfortable. Cramped designs look cheap.",
+    "Subtle grain textures, noise overlays, custom cursors, selection states, and loading animations: separates good from extraordinary.",
+    "Main agent relies on these image URLs. Missing categories = main agent will use placeholder text which is FORBIDDEN.",
+    "Prioritize using pre-existing components from src/components/ui when applicable.",
+    "Use sonner for toasts. Sonner component are located in /app/frontend/src/components/ui/sonner.jsx"
+  ]
+}

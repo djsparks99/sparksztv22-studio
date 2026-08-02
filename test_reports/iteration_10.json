@@ -1,0 +1,34 @@
+{
+  "summary": "Iteration 10 regression verified: no seed/mock code, no auto-seed on startup, empty-state UI works correctly. All 7 pytest tests + all 5 playwright scenarios PASSED. Backend tests used direct db.channels inserts w/ teardown (no /register calls) so DB stayed clean — post-test count still 1 user (djsparkz). Followed testing_agent_context_note precisely.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "verified_scenarios": {
+    "static_code_check_frontend_mock_identifiers": "PASS (zero matches for MOCK_CHANNELS/MOCK_DATA/dummyChannel/fakeChannels/seedChannels/hardcodedChannels)",
+    "static_code_check_backend_seed_identifiers": "PASS (zero matches for seed_users/seed_channels/seed_data/auto_seed/insert_dummy)",
+    "startup_does_not_insert_docs": "PASS (server.py startup() only creates indexes, calls init_storage, ensure_livepeer_webhook which only writes db.system._id=livepeer_webhook, and _backfill_recording which only updates existing docs)",
+    "live_only_returns_only_live": "PASS (offline test-seeded doc excluded)",
+    "unfiltered_returns_all": "PASS (offline test-seeded doc included)",
+    "homepage_defaults_live_only_true": "PASS (network intercept confirmed initial GET /api/channels?live_only=true)",
+    "chip_initial_state_active_LIVE_ONLY": "PASS (text='◉ LIVE ONLY', class contains 'active')",
+    "empty_state_message_live_only": "PASS ('No streams currently live. Check back soon.')",
+    "empty_state_message_all_mode": "PASS ('No channels registered yet. Be the first to broadcast.')",
+    "toggle_off_calls_api_without_live_only": "PASS",
+    "sabotaged_empty_response_no_fallback_cards": "PASS (0 channel cards rendered, no hidden array)",
+    "response_no_mongodb_id": "PASS"
+  },
+  "test_report_links": ["/app/backend/tests/test_no_seed_pollution.py", "/app/test_reports/pytest/no_seed_results.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Browse.jsx polls /api/channels every 10s — fine but consider ETag/If-Modified-Since to reduce load once channel count grows.",
+    "server.py is 1150+ lines; consider splitting routes (auth, channels, chat, webhooks) into separate modules for maintainability.",
+    "channel_public() has 7 optional kwargs — starting to smell; could return a Pydantic model or use a builder."
+  ],
+  "updated_files": ["/app/backend/tests/test_no_seed_pollution.py"],
+  "success_rate": {"backend": "100% (7/7)", "frontend": "100% (5/5 scenarios)"},
+  "test_credentials": "djsparkz password unknown (per instructions); frontend tests performed anonymously — sufficient since following-only path was not exercised. Following-only empty message text was verified via static code inspection of Browse.jsx L205-206.",
+  "seed_data_creation": "Test fixture inserted 1 offline placeholder channel per test with username prefix 'test_noseed_<uuid8>' directly via pymongo, removed in teardown. Global module teardown also purges any leftovers matching that pattern. DB verified clean after run.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "The bug is fixed and stable. DB still contains exactly 1 user (djsparkz, is_live=true). The regression test file /app/backend/tests/test_no_seed_pollution.py uses direct Mongo inserts — never call /api/auth/register from tests (that provisions Livepeer streams and pollutes DB). Use category=jungle + live_only=true to trigger the empty state without touching data. Following-only path was NOT exercised at runtime (no auth) — if needed next round, seed a JWT into localStorage per the review request suggestion.",
+  "rca of the issue": "Root cause of prior 'dummy channels' complaint: earlier testing_agent iterations called POST /api/auth/register which provisions real Livepeer streams and inserts real users. Those users appeared as offline channels on the homepage and looked like seeded/dummy data. Fix (already applied by E1): (1) purge DB, (2) homepage now defaults liveOnly=true so offline stale channels are hidden by default, (3) empty-state copy clarifies context. This iteration's tests confirm no code-level seeding remains and the guard rails work."
+}

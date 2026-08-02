@@ -1,0 +1,8 @@
+{
+  "name": "Sparkz.TV",
+  "description": "Underground Live Streaming platform for pirate radio DJs, electronic music producers, and live broadcasting",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
