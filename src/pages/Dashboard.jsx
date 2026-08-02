@@ -85,13 +85,15 @@ export default function Dashboard() {
   const createStream = async () => {
     setCreatingStream(true);
     try {
+      const apiKey = import.meta.env.VITE_LIVEPEER_API_KEY || "";
+      
       const response = await fetch("https://livepeer.studio/api/stream", {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${import.meta.env.VITE_LIVEPEER_API_KEY}`,
+          Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ name: `${channel.username}-stream` }),
+        body: JSON.stringify({ name: `${channel?.username || "stream"}-session` }),
       });
 
       if (!response.ok) throw new Error("Livepeer API failed");
@@ -99,17 +101,17 @@ export default function Dashboard() {
 
       const updatedChannelData = {
         ...channel,
-        stream_key: streamData.streamKey,
+        stream_key: streamData.streamKey || streamData.stream_key || "",
         rtmp_url: "rtmp://rtmp.livepeer.com/live",
-        playback_url: `https://livepeer.com/playback/${streamData.playbackId}/index.m3u8`,
-        playback_id: streamData.playbackId,
+        playback_url: `https://livepeer.com/playback/${streamData.playbackId || streamData.playback_id}/index.m3u8`,
+        playback_id: streamData.playbackId || streamData.playback_id || "",
       };
 
       setChannel(updatedChannelData);
       toast.success("Livepeer stream generated successfully!");
     } catch (error) {
       console.error(error);
-      toast.error("Livepeer stream creation failed.");
+      toast.error("Livepeer stream creation failed. Check your API key in Cloudflare settings.");
     } finally {
       setCreatingStream(false);
     }
@@ -408,7 +410,7 @@ function ThumbnailUploader({ channel, onChange }) {
 
   return (
     <div className="border border-[#27272a] bg-[#0a0a0a] p-6" data-testid="thumbnail-uploader">
-      <div className="flex items-center gap-2">
+      <div className="fn flex items-center gap-2">
         <ImageIcon className="h-3.5 w-3.5 text-[#e5ff00]" />
         <div className="label-caps mb-0">// PREVIEW THUMBNAIL</div>
       </div>

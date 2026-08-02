@@ -8,11 +8,11 @@ export function useLivepeerAutoPoll(channelIdentifier) {
 
     const pollStatus = async () => {
       try {
-        // If we don't have a playback ID or stream identifier to check, skip
+        // If we don't have a stream identifier to check, skip
         if (!channelIdentifier) return;
 
-        // Directly query Livepeer Studio API to check stream active status
-        const response = await fetch(`https://livepeer.studio/api/stream?streamId=${channelIdentifier}`, {
+        // Directly query Livepeer Studio API using the correct path parameter
+        const response = await fetch(`https://livepeer.studio/api/stream/${channelIdentifier}`, {
           method: "GET",
           headers: {
             Authorization: `Bearer ${import.meta.env.VITE_LIVEPEER_API_KEY}`,
@@ -21,11 +21,10 @@ export function useLivepeerAutoPoll(channelIdentifier) {
         });
 
         if (!response.ok) return;
-        const streams = await response.json();
+        const streamData = await response.json();
         
-        // Find if any returned stream is currently active/streaming
-        const activeStream = streams.find((s) => s.isActive);
-        const isLive = Boolean(activeStream);
+        // Livepeer returns a single stream object containing an isActive boolean field
+        const isLive = Boolean(streamData?.isActive);
         const nowIso = new Date().toISOString();
 
         if (!cancelled) {
@@ -58,7 +57,7 @@ export function useLivepeerAutoPoll(channelIdentifier) {
     };
 
     pollStatus();
-    const interval = setInterval(pollStatus, 10000); // Polling every 10 seconds to stay well within rate limits
+    const interval = setInterval(pollStatus, 10000); // Polling every 10 seconds
 
     return () => {
       cancelled = true;
