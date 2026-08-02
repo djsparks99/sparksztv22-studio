@@ -11,6 +11,7 @@ import ShareButton from "@/components/ShareButton";
 import SessionList from "@/components/SessionList";
 import ScheduleDisplay from "@/components/ScheduleDisplay";
 import LiveDuration from "@/components/LiveDuration";
+import UserLocationTime from "@/components/UserLocationTime";
 import { useAuth } from "@/lib/auth-context";
 import { Eye, ArrowLeft, User, Clock } from "lucide-react";
 import { useLivepeerAutoPoll } from "@/hooks/useLivepeerAutoPoll";
@@ -171,6 +172,7 @@ export default function Channel() {
                 </h1>
               </div>
               <div className="flex flex-wrap items-center gap-3">
+                <UserLocationTime />
                 {channel.is_live && (
                   <div className="flex items-center gap-2 border border-[#27272a] px-3 py-2">
                     <Eye className="h-4 w-4 text-[#e5ff00]" />
@@ -256,7 +258,12 @@ export default function Channel() {
             <dl className="mt-4 space-y-3 font-mono text-xs">
               <Row label="STATUS">{channel.is_live ? "LIVE" : "OFF AIR"}</Row>
               <Row label="CATEGORY">{channel.category}</Row>
-              <Row label="VIEWERS">{channel.viewer_count || 0}</Row>
+              <Row label="VIEWERS">
+                <span className="inline-flex items-center gap-1.5">
+                  <Eye className="h-3.5 w-3.5 text-[#e5ff00]" />
+                  <span>{channel.viewer_count || 0}</span>
+                </span>
+              </Row>
               <Row label="PLAYBACK ID" mono>
                 {channel.playback_id}
               </Row>

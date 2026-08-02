@@ -38,7 +38,7 @@ export default function UsernameLockModal() {
       data-testid="username-lock-modal"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 backdrop-blur-md"
     >
-      <div className="w-full max-w-md border border-[#333] bg-[#0d0d0e] p-6 shadow-2xl sm:p-8">
+      <div className="w-full max-w-md border border-[#27272a] bg-[#0a0a0a] p-6 shadow-2xl sm:p-8">
         <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-[#e5ff00]">
           <Lock className="h-4 w-4" />
           // ONE-TIME REGISTRATION
@@ -64,7 +64,7 @@ export default function UsernameLockModal() {
               maxLength={48}
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              className="input-terminal w-full bg-[#141416] text-white"
+              className="input-terminal w-full text-white"
               placeholder="e.g. DJ Sparkz"
             />
           </div>
@@ -83,7 +83,7 @@ export default function UsernameLockModal() {
               pattern="[a-zA-Z0-9_]+"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="input-terminal w-full bg-[#141416] text-[#e5ff00] lowercase"
+              className="input-terminal w-full text-[#e5ff00] lowercase"
               placeholder="e.g. sparkz_live"
             />
             <p className="mt-1 font-mono text-[10px] text-zinc-500">

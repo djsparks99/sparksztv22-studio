@@ -4,6 +4,7 @@ import { api, fileUrl } from "@/lib/api";
 import { db } from "@/lib/firebase";
 import { collection, onSnapshot } from "firebase/firestore";
 import { Search, Radio, Eye, User, Calendar, Clock, Filter, X } from "lucide-react";
+import StoriesSection from "@/components/StoriesSection";
 
 const CATEGORIES = [
   "ALL",
@@ -200,7 +201,10 @@ export default function Directory() {
   }, [totalValidChannels, query, selectedCategory, statusFilter]);
 
   return (
-    <div className="mx-auto max-w-[1440px] px-6 py-8" data-testid="streamer-directory-page">
+    <div>
+      <StoriesSection />
+
+      <div className="mx-auto max-w-[1440px] px-6 py-8" data-testid="streamer-directory-page">
       {/* Header Banner */}
       <div className="border border-[#27272a] bg-[#0a0a0a] p-8">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -357,6 +361,7 @@ export default function Directory() {
           </div>
         )}
       </div>
+    </div>
     </div>
   );
 }

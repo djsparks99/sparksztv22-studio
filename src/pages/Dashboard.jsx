@@ -6,6 +6,7 @@ import SessionList from "@/components/SessionList";
 import ScheduleManager from "@/components/ScheduleManager";
 import EmoteManager from "@/components/EmoteManager";
 import LiveDuration from "@/components/LiveDuration";
+import UserLocationTime from "@/components/UserLocationTime";
 import { toast } from "sonner";
 import { Copy, RefreshCw, Radio, Eye, ExternalLink, Zap, Clock, Image as ImageIcon, Trash2 } from "lucide-react";
 import { useLivepeerAutoPoll } from "@/hooks/useLivepeerAutoPoll";
@@ -124,6 +125,7 @@ export default function Dashboard() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-3">
+          <UserLocationTime />
           <span
             data-testid="auto-detect-badge"
             className="inline-flex items-center gap-2 border border-[#e5ff00] px-3 py-2 font-mono text-[10px] uppercase tracking-widest text-[#e5ff00]"

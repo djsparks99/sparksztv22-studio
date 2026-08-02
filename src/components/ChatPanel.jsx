@@ -77,17 +77,23 @@ export default function ChatPanel({ username }) {
 
   // Watts Time-based Accrual Heartbeat (ping every 10 seconds while connected/watching)
   useEffect(() => {
-    if (!user || !connected) return;
+    if (!connected) return;
 
     const interval = setInterval(async () => {
       try {
-        const { data } = await api.post(`/channels/${username}/watts/ping`);
-        if (data && typeof data.watts === "number") {
-          setWatts(data.watts);
-          if (data.accrued > 0) {
-            setAccruedNotice(`+${data.accrued} ⚡ WATTS ACCRUED`);
-            setTimeout(() => setAccruedNotice(null), 3000);
+        if (user) {
+          const { data } = await api.post(`/channels/${username}/watts/ping`);
+          if (data && typeof data.watts === "number") {
+            setWatts(data.watts);
+            if (data.accrued > 0) {
+              setAccruedNotice(`+${data.accrued} ⚡ WATTS ACCRUED`);
+              setTimeout(() => setAccruedNotice(null), 3000);
+            }
           }
+        } else {
+          setWatts((prev) => prev + 15);
+          setAccruedNotice(`+15 ⚡ WATTS ACCRUED`);
+          setTimeout(() => setAccruedNotice(null), 3000);
         }
       } catch {
         // Silently ignore ping errors
@@ -99,11 +105,7 @@ export default function ChatPanel({ username }) {
 
   // Connect to WebSocket chat room
   useEffect(() => {
-    const token = getToken();
-    if (!user || !token) {
-      setConnected(false);
-      return;
-    }
+    const token = getToken() || "guest";
     const ws = new WebSocket(wsUrl(username, token));
     wsRef.current = ws;
     ws.onopen = () => setConnected(true);
@@ -130,7 +132,7 @@ export default function ChatPanel({ username }) {
             },
           ]);
 
-          if (typeof data.user_watts === "number" && data.sender_uid === user.uid) {
+          if (typeof data.user_watts === "number" && user && data.sender_uid === user.uid) {
             setWatts(data.user_watts);
           }
         } else if (data.type === "system") {
@@ -208,16 +210,14 @@ export default function ChatPanel({ username }) {
       <header className="flex items-center justify-between border-b border-[#27272a] px-4 py-3 bg-[#0d0d0e]">
         <div className="flex items-center gap-2">
           <div className="label-caps mb-0">// CROWD CHAT</div>
-          {user && (
-            <div
-              data-testid="watts-counter"
-              className="inline-flex items-center gap-1 border border-[#e5ff00]/40 bg-[#e5ff00]/10 px-2 py-0.5 font-mono text-[10px] uppercase font-bold text-[#e5ff00] rounded-sm"
-              title="Your Viewer Watts points accrued while watching"
-            >
-              <Zap className="h-3 w-3 fill-[#e5ff00]" />
-              <span>{watts} WATTS</span>
-            </div>
-          )}
+          <div
+            data-testid="watts-counter"
+            className="inline-flex items-center gap-1 border border-[#e5ff00]/40 bg-[#e5ff00]/10 px-2 py-0.5 font-mono text-[10px] uppercase font-bold text-[#e5ff00] rounded-sm"
+            title="Your Viewer Watts points accrued while watching"
+          >
+            <Zap className="h-3 w-3 fill-[#e5ff00]" />
+            <span>{watts} WATTS</span>
+          </div>
         </div>
 
         <div className="flex items-center gap-3">
@@ -228,14 +228,14 @@ export default function ChatPanel({ username }) {
           )}
           <span
             data-testid="chat-connection-status"
-            className={`inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest ${
+            className={`hidden inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest ${
               connected ? "text-[#e5ff00]" : "text-zinc-500"
             }`}
           >
             <span
               className={`h-1.5 w-1.5 ${connected ? "bg-[#e5ff00] live-dot" : "bg-zinc-600"}`}
             />
-            {connected ? "LIVE" : user ? "CONNECTING…" : "READ-ONLY"}
+            {connected ? "LIVE" : "CONNECTING…"}
           </span>
         </div>
       </header>
@@ -270,7 +270,7 @@ export default function ChatPanel({ username }) {
       {showEmotePicker && (
         <div
           data-testid="emote-picker-popover"
-          className="absolute bottom-16 right-3 left-3 z-30 border border-[#27272a] bg-[#121214] p-3 shadow-2xl rounded-sm"
+          className="absolute bottom-16 right-3 left-3 z-30 border border-[#27272a] bg-[#050505] p-3 shadow-2xl rounded-sm"
         >
           <div className="flex items-center justify-between border-b border-[#27272a] pb-2">
             <div className="flex items-center gap-2">
@@ -351,78 +351,81 @@ export default function ChatPanel({ username }) {
 
       {/* Input Bar */}
       <footer className="border-t border-[#27272a] p-3 bg-[#0a0a0a]">
-        {user ? (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <button
-                type="button"
-                onClick={() => setIsHighlight(!isHighlight)}
-                disabled={watts < 50}
-                data-testid="toggle-highlight-btn"
-                className={`inline-flex items-center gap-1.5 border px-2 py-1 font-mono text-[10px] uppercase font-bold tracking-wider transition-all rounded-sm ${
-                  isHighlight
-                    ? "border-[#e5ff00] bg-[#e5ff00] text-black shadow-[0_0_12px_rgba(229,255,0,0.6)]"
-                    : watts >= 50
-                    ? "border-[#e5ff00]/40 text-[#e5ff00] hover:border-[#e5ff00] bg-[#e5ff00]/10"
-                    : "border-zinc-800 text-zinc-600 opacity-50 cursor-not-allowed"
-                }`}
-              >
-                <Flame className={`h-3 w-3 ${isHighlight ? "animate-pulse" : ""}`} />
-                <span>HIGH VOLTAGE SHOUT (50 ⚡)</span>
-              </button>
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <button
+              type="button"
+              onClick={() => setIsHighlight(!isHighlight)}
+              disabled={watts < 50}
+              data-testid="toggle-highlight-btn"
+              className={`inline-flex items-center gap-1.5 border px-2 py-1 font-mono text-[10px] uppercase font-bold tracking-wider transition-all rounded-sm ${
+                isHighlight
+                  ? "border-[#e5ff00] bg-[#e5ff00] text-black shadow-[0_0_12px_rgba(229,255,0,0.6)]"
+                  : watts >= 50
+                  ? "border-[#e5ff00]/40 text-[#e5ff00] hover:border-[#e5ff00] bg-[#e5ff00]/10"
+                  : "border-zinc-800 text-zinc-600 opacity-50 cursor-not-allowed"
+              }`}
+            >
+              <Flame className={`h-3 w-3 ${isHighlight ? "animate-pulse" : ""}`} />
+              <span>HIGH VOLTAGE SHOUT (50 ⚡)</span>
+            </button>
 
+            {!user ? (
+              <Link
+                to="/login"
+                className="font-mono text-[9px] uppercase tracking-widest text-[#e5ff00] hover:underline flex items-center gap-1"
+              >
+                <LogIn className="h-2.5 w-2.5" /> LOG IN
+              </Link>
+            ) : (
               <span className="font-mono text-[9px] uppercase tracking-widest text-zinc-500">
                 EARN 15⚡ / 10S
               </span>
+            )}
+          </div>
+
+          <form onSubmit={send} className="flex gap-2" data-testid="chat-form">
+            <div className="relative flex-1">
+              <input
+                ref={inputRef}
+                data-testid="chat-input"
+                className={`input-terminal w-full pr-8 ${
+                  isHighlight ? "border-[#e5ff00] bg-[#e5ff00]/10 text-white font-bold" : ""
+                }`}
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                placeholder={
+                  isHighlight
+                    ? "⚡ SHOUT WITH HIGH VOLTAGE GLOW..."
+                    : !user
+                    ? "SHOUT AS GUEST (Or log in)..."
+                    : "SHOUT INTO THE ROOM…"
+                }
+                maxLength={500}
+                disabled={!connected}
+              />
+              <button
+                type="button"
+                onClick={() => setShowEmotePicker(!showEmotePicker)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-[#e5ff00]"
+                title="Insert Emote"
+                data-testid="emote-picker-toggle"
+              >
+                <Smile className="h-4 w-4" />
+              </button>
             </div>
 
-            <form onSubmit={send} className="flex gap-2" data-testid="chat-form">
-              <div className="relative flex-1">
-                <input
-                  ref={inputRef}
-                  data-testid="chat-input"
-                  className={`input-terminal w-full pr-8 ${
-                    isHighlight ? "border-[#e5ff00] bg-[#e5ff00]/10 text-white font-bold" : ""
-                  }`}
-                  value={text}
-                  onChange={(e) => setText(e.target.value)}
-                  placeholder={
-                    isHighlight ? "⚡ SHOUT WITH HIGH VOLTAGE GLOW..." : "SHOUT INTO THE ROOM…"
-                  }
-                  maxLength={500}
-                  disabled={!connected}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowEmotePicker(!showEmotePicker)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-[#e5ff00]"
-                  title="Insert Emote"
-                  data-testid="emote-picker-toggle"
-                >
-                  <Smile className="h-4 w-4" />
-                </button>
-              </div>
-
-              <button
-                data-testid="chat-send"
-                type="submit"
-                className={`btn-primary ${isHighlight ? "bg-[#e5ff00] text-black hover:bg-[#c8de00]" : ""}`}
-                disabled={!connected || !text.trim()}
-                aria-label="Send message"
-              >
-                <Send className="h-3.5 w-3.5" />
-              </button>
-            </form>
-          </div>
-        ) : (
-          <Link
-            to="/login"
-            data-testid="chat-login-cta"
-            className="btn-ghost inline-flex w-full items-center justify-center gap-2 py-3"
-          >
-            <LogIn className="h-3.5 w-3.5 text-[#e5ff00]" /> LOG IN TO JOIN CHAT & EARN WATTS
-          </Link>
-        )}
+            <button
+              data-testid="chat-send"
+              type="submit"
+              className={`btn-primary ${isHighlight ? "bg-[#e5ff00] text-black hover:bg-[#c8de00]" : ""}`}
+              disabled={!connected || !text.trim()}
+              aria-label="Send message"
+            >
+              <Send className="h-3.5 w-3.5" />
+            </button>
+          </form>
+        </div>
       </footer>
     </div>
   );

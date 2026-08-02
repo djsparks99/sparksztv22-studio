@@ -17,9 +17,7 @@ function isDocId(str) {
   const trimmed = str.trim();
   return (
     trimmed.length >= 20 &&
-    /^[A-Za-z0-9_-]+$/.test(trimmed) &&
-    /[0-9]/.test(trimmed) &&
-    /[A-Z]/.test(trimmed)
+    /^[A-Za-z0-9_-]+$/.test(trimmed)
   );
 }
 
@@ -46,9 +44,7 @@ function cleanString(str) {
 
 function isValidChannel(c) {
   if (!c || typeof c !== "object") return false;
-  const validUname = isValidString(c.username);
-  const validDname = isValidString(c.display_name);
-  return validUname || validDname;
+  return Boolean(c.username || c.display_name || c.channel_id || c.id);
 }
 
 function getNormalizedKey(data, docId) {
@@ -65,27 +61,27 @@ function getNormalizedKey(data, docId) {
 }
 
 function getDisplayName(c) {
-  const dName = cleanString(c?.display_name);
-  if (dName) return dName;
-
-  const uName = cleanString(c?.username);
-  if (uName) return uName;
-
-  const cId = cleanString(c?.channel_id);
-  if (cId) return cId;
-
-  return "";
+  if (c?.display_name && typeof c.display_name === "string" && c.display_name.trim()) {
+    const trimmed = c.display_name.trim();
+    if (!isDocId(trimmed) && trimmed.toLowerCase() !== "undefined") return trimmed;
+  }
+  if (c?.username && typeof c.username === "string" && c.username.trim()) {
+    const trimmed = c.username.trim();
+    if (!isDocId(trimmed) && trimmed.toLowerCase() !== "undefined") return trimmed;
+  }
+  return "DJ Sparkz";
 }
 
 function getTargetUsername(c) {
   const uName = cleanString(c?.username);
   if (uName) return uName;
 
-  const dName = cleanString(c?.display_name);
-  if (dName) return dName;
-
-  const cId = cleanString(c?.channel_id);
-  if (cId) return cId;
+  if (c?.display_name && typeof c.display_name === "string" && c.display_name.trim()) {
+    const trimmed = c.display_name.trim();
+    if (!isDocId(trimmed) && trimmed.toLowerCase() !== "undefined") {
+      return trimmed.toLowerCase().replace(/\s+/g, "_");
+    }
+  }
 
   return "djsparkz";
 }
@@ -285,6 +281,7 @@ export default function LiveSidebar() {
     setCollapsed(next);
     try {
       localStorage.setItem(STORAGE_KEY, next ? "1" : "0");
+      window.dispatchEvent(new Event("sidebar-toggle"));
     } catch {
       // ignore
     }
@@ -297,35 +294,52 @@ export default function LiveSidebar() {
     return !DUMMY_USERNAMES.includes(norm) && !c.is_dummy;
   });
 
-  // Strictly enforce FOLLOWED CHANNELS rule: Only include channels the user explicitly follows
-  const visibleChannels = safeChannels.filter((c) => {
+  // Separate followed channels and recommended/other channels
+  const followedChannels = safeChannels.filter((c) => {
     if (!user) return false;
     const targetUname = getTargetUsername(c).toLowerCase();
     return followedSet.has(targetUname);
   });
 
-  // Separate into Live, Scheduled, and Offline Followed Channels
-  const liveChannels = visibleChannels.filter((c) => Boolean(c.is_live || c.isLive));
-  const upcomingChannels = visibleChannels.filter(
+  const recommendedChannels = safeChannels.filter((c) => {
+    const targetUname = getTargetUsername(c).toLowerCase();
+    return !user || !followedSet.has(targetUname);
+  });
+
+  // Followed breakdown
+  const followedLive = followedChannels.filter((c) => Boolean(c.is_live || c.isLive));
+  const followedUpcoming = followedChannels.filter(
     (c) => !Boolean(c.is_live || c.isLive) && Array.isArray(c.schedule) && c.schedule.length > 0
   );
-  const offlineChannels = visibleChannels.filter(
+  const followedOffline = followedChannels.filter(
     (c) => !Boolean(c.is_live || c.isLive) && (!Array.isArray(c.schedule) || c.schedule.length === 0)
   );
+
+  // Recommended breakdown
+  const recommendedLive = recommendedChannels.filter((c) => Boolean(c.is_live || c.isLive));
+  const recommendedUpcoming = recommendedChannels.filter(
+    (c) => !Boolean(c.is_live || c.isLive) && Array.isArray(c.schedule) && c.schedule.length > 0
+  );
+  const recommendedOffline = recommendedChannels.slice(0, 5);
+
+  const hasAnyChannels =
+    followedChannels.length > 0 || recommendedLive.length > 0 || recommendedChannels.length > 0;
 
   return (
     <aside
       data-testid="live-sidebar"
       className={`fixed left-0 top-[calc(4rem+var(--ticker-height,37px))] z-30 hidden h-[calc(100vh-4rem-var(--ticker-height,37px))] flex-col border-r border-[#27272a] bg-[#050505] lg:flex ${
         collapsed ? "w-[60px]" : "w-[240px]"
-      } transition-[width,top,height] duration-150`}
+      } transition-[width,top,height] duration-150 overflow-x-hidden`}
     >
-      <header className="flex flex-col border-b border-[#27272a] px-3 py-2.5 gap-1.5">
-        <div className="flex items-center justify-between">
+      <header className="flex flex-col border-b border-[#27272a] px-3 py-2.5 gap-1.5 min-w-0">
+        <div className="flex items-center justify-between gap-1 min-w-0">
           {!collapsed && (
-            <div className="flex items-center gap-1.5">
-              <Heart className="h-3.5 w-3.5 text-[#e5ff00] fill-current" />
-              <div className="label-caps mb-0 truncate">// FOLLOWED CHANNELS</div>
+            <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
+              <Heart className="h-3.5 w-3.5 text-[#e5ff00] fill-current shrink-0" />
+              <div className="label-caps mb-0 truncate text-[10px]">
+                {user ? "// FOLLOWED" : "// FEATURED"}
+              </div>
             </div>
           )}
           <button
@@ -353,26 +367,26 @@ export default function LiveSidebar() {
               </div>
             ))}
           </div>
-        ) : visibleChannels.length === 0 ? (
+        ) : !hasAnyChannels ? (
           <EmptyState
             collapsed={collapsed}
             isLoggedIn={Boolean(user)}
           />
         ) : (
           <>
-            {/* LIVE CHANNELS SECTION */}
-            {liveChannels.length > 0 && (
+            {/* FOLLOWED LIVE SECTION */}
+            {followedLive.length > 0 && (
               <div>
                 {!collapsed && (
                   <div className="px-3 pt-3 pb-1.5 flex items-center justify-between font-mono text-[9px] font-bold uppercase tracking-widest text-[#e5ff00]">
                     <span className="flex items-center gap-1">
                       <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
-                      LIVE NOW ({liveChannels.length})
+                      FOLLOWED LIVE ({followedLive.length})
                     </span>
                   </div>
                 )}
                 <ul>
-                  {liveChannels.map((c) => (
+                  {followedLive.map((c) => (
                     <SidebarBroadcasterItem
                       key={getNormalizedKey(c, c.id)}
                       channel={c}
@@ -386,19 +400,45 @@ export default function LiveSidebar() {
               </div>
             )}
 
-            {/* UPCOMING / SCHEDULED SECTION */}
-            {upcomingChannels.length > 0 && (
+            {/* RECOMMENDED LIVE CHANNELS SECTION */}
+            {recommendedLive.length > 0 && (
+              <div>
+                {!collapsed && (
+                  <div className="px-3 pt-3 pb-1.5 flex items-center justify-between font-mono text-[9px] font-bold uppercase tracking-widest text-red-500">
+                    <span className="flex items-center gap-1">
+                      <Radio className="h-3 w-3 text-red-500 animate-pulse" />
+                      {followedChannels.length > 0 ? "RECOMMENDED LIVE" : "LIVE NOW"} ({recommendedLive.length})
+                    </span>
+                  </div>
+                )}
+                <ul>
+                  {recommendedLive.map((c) => (
+                    <SidebarBroadcasterItem
+                      key={getNormalizedKey(c, c.id)}
+                      channel={c}
+                      collapsed={collapsed}
+                      isChimed={Boolean(chimes[getTargetUsername(c).toLowerCase()])}
+                      onToggleChime={toggleChime}
+                      navigate={navigate}
+                    />
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* FOLLOWED SCHEDULED SECTION */}
+            {followedUpcoming.length > 0 && (
               <div>
                 {!collapsed && (
                   <div className="px-3 pt-3 pb-1.5 flex items-center justify-between font-mono text-[9px] font-bold uppercase tracking-widest text-zinc-400">
                     <span className="flex items-center gap-1">
                       <Calendar className="h-3 w-3 text-[#e5ff00]" />
-                      SCHEDULED ({upcomingChannels.length})
+                      FOLLOWED SCHEDULED ({followedUpcoming.length})
                     </span>
                   </div>
                 )}
                 <ul>
-                  {upcomingChannels.map((c) => (
+                  {followedUpcoming.map((c) => (
                     <SidebarBroadcasterItem
                       key={getNormalizedKey(c, c.id)}
                       channel={c}
@@ -412,8 +452,34 @@ export default function LiveSidebar() {
               </div>
             )}
 
-            {/* OFFLINE FOLLOWED CHANNELS SECTION (Collapsible to keep sidebar clutter-free) */}
-            {offlineChannels.length > 0 && (
+            {/* RECOMMENDED CHANNELS (When user follows no channels or guest) */}
+            {followedChannels.length === 0 && recommendedUpcoming.length > 0 && (
+              <div>
+                {!collapsed && (
+                  <div className="px-3 pt-3 pb-1.5 flex items-center justify-between font-mono text-[9px] font-bold uppercase tracking-widest text-zinc-400">
+                    <span className="flex items-center gap-1">
+                      <Calendar className="h-3 w-3 text-[#e5ff00]" />
+                      UPCOMING SETS ({recommendedUpcoming.length})
+                    </span>
+                  </div>
+                )}
+                <ul>
+                  {recommendedUpcoming.map((c) => (
+                    <SidebarBroadcasterItem
+                      key={getNormalizedKey(c, c.id)}
+                      channel={c}
+                      collapsed={collapsed}
+                      isChimed={Boolean(chimes[getTargetUsername(c).toLowerCase()])}
+                      onToggleChime={toggleChime}
+                      navigate={navigate}
+                    />
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* OFFLINE FOLLOWED CHANNELS SECTION */}
+            {followedOffline.length > 0 && (
               <div>
                 {!collapsed && (
                   <button
@@ -421,7 +487,7 @@ export default function LiveSidebar() {
                     onClick={toggleShowOffline}
                     className="w-full px-3 py-2 flex items-center justify-between font-mono text-[9px] font-bold uppercase tracking-widest text-zinc-500 hover:text-zinc-300 transition-colors border-t border-[#27272a]/40 bg-[#080808]"
                   >
-                    <span>OFFLINE FOLLOWED ({offlineChannels.length})</span>
+                    <span>OFFLINE FOLLOWED ({followedOffline.length})</span>
                     {showOffline ? (
                       <ChevronUp className="h-3 w-3" />
                     ) : (
@@ -431,7 +497,41 @@ export default function LiveSidebar() {
                 )}
                 {(showOffline || collapsed) && (
                   <ul>
-                    {offlineChannels.map((c) => (
+                    {followedOffline.map((c) => (
+                      <SidebarBroadcasterItem
+                        key={getNormalizedKey(c, c.id)}
+                        channel={c}
+                        collapsed={collapsed}
+                        isChimed={Boolean(chimes[getTargetUsername(c).toLowerCase()])}
+                        onToggleChime={toggleChime}
+                        navigate={navigate}
+                      />
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+
+            {/* FEATURED / RECOMMENDED DIRECTORY CHANNELS (Guests or when user follows no channels) */}
+            {followedChannels.length === 0 && recommendedOffline.length > 0 && (
+              <div>
+                {!collapsed && (
+                  <button
+                    type="button"
+                    onClick={toggleShowOffline}
+                    className="w-full px-3 py-2 flex items-center justify-between font-mono text-[9px] font-bold uppercase tracking-widest text-zinc-500 hover:text-zinc-300 transition-colors border-t border-[#27272a]/40 bg-[#080808]"
+                  >
+                    <span>RECOMMENDED CHANNELS</span>
+                    {showOffline ? (
+                      <ChevronUp className="h-3 w-3" />
+                    ) : (
+                      <ChevronDown className="h-3 w-3" />
+                    )}
+                  </button>
+                )}
+                {(showOffline || collapsed) && (
+                  <ul>
+                    {recommendedOffline.map((c) => (
                       <SidebarBroadcasterItem
                         key={getNormalizedKey(c, c.id)}
                         channel={c}

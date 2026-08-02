@@ -145,7 +145,7 @@ export default function Profile() {
                 </div>
                 <input
                   id="username"
-                  className="input-terminal opacity-70 bg-[#121214] text-[#e5ff00] cursor-not-allowed"
+                  className="input-terminal opacity-70 bg-[#050505] text-[#e5ff00] cursor-not-allowed"
                   value={user.username}
                   readOnly
                 />

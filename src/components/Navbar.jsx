@@ -1,9 +1,55 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth-context";
-import { Radio, User, LogOut, LayoutDashboard, Settings, Tv, ChevronDown, Search } from "lucide-react";
+import { Radio, User, LogOut, LayoutDashboard, Settings, Tv, ChevronDown, Search, Sun, Moon } from "lucide-react";
 import { fileUrl } from "@/lib/api";
 import NotificationBell from "@/components/NotificationBell";
+// Transparent yellow speech bubble logo sticker icon with cute cartoon eyes
+function SpeechBubbleLogo({ className = "h-10 w-10" }) {
+  return (
+    <svg
+      viewBox="0 0 100 100"
+      className={className}
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <defs>
+        <linearGradient id="bubbleYellowGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stopColor="#f3ff26" />
+          <stop offset="100%" stopColor="#d5ee00" />
+        </linearGradient>
+      </defs>
+
+      {/* Outer White Sticker Outline */}
+      <path
+        d="M 28 12 L 72 12 A 16 16 0 0 1 88 28 L 88 60 A 16 16 0 0 1 72 76 L 34 76 L 19 89 C 16 91 11 88 13 84 L 16 75 A 16 16 0 0 1 12 60 L 12 28 A 16 16 0 0 1 28 12 Z"
+        fill="#ffffff"
+        stroke="#ffffff"
+        strokeWidth="6"
+        strokeLinejoin="round"
+      />
+
+      {/* Inner Black Outline & Yellow Fill */}
+      <path
+        d="M 28 15 L 72 15 A 13 13 0 0 1 85 28 L 85 58 A 13 13 0 0 1 72 71 L 34 71 L 21 82 C 19 83.5 16 81.5 17 78.5 L 18.5 70.5 A 13 13 0 0 1 15 58 L 15 28 A 13 13 0 0 1 28 15 Z"
+        fill="url(#bubbleYellowGrad)"
+        stroke="#0d0d0d"
+        strokeWidth="5"
+        strokeLinejoin="round"
+      />
+
+      {/* Left Cartoon Eye */}
+      <circle cx="37" cy="43" r="8.5" fill="#0d0d0d" />
+      <circle cx="34.5" cy="40.5" r="3" fill="#ffffff" />
+      <circle cx="39.5" cy="45.5" r="1.3" fill="#ffffff" />
+
+      {/* Right Cartoon Eye */}
+      <circle cx="63" cy="43" r="8.5" fill="#0d0d0d" />
+      <circle cx="60.5" cy="40.5" r="3" fill="#ffffff" />
+      <circle cx="65.5" cy="45.5" r="1.3" fill="#ffffff" />
+    </svg>
+  );
+}
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,6 +63,24 @@ export default function Navbar() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [navSearch, setNavSearch] = useState("");
+  const [isLight, setIsLight] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("sparkz_theme") === "light";
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    if (isLight) {
+      document.documentElement.classList.add("light");
+      localStorage.setItem("sparkz_theme", "light");
+    } else {
+      document.documentElement.classList.remove("light");
+      localStorage.setItem("sparkz_theme", "dark");
+    }
+  }, [isLight]);
+
+  const toggleTheme = () => setIsLight((prev) => !prev);
 
   const onLogout = () => {
     logout();
@@ -41,10 +105,8 @@ export default function Navbar() {
       <div className="w-full flex h-16 items-center justify-between px-2 sm:px-4">
         <div className="flex items-center gap-6 md:gap-8">
           <Link to="/" data-testid="brand-logo" className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center border border-[#e5ff00] bg-[#e5ff00]">
-              <Radio className="h-4 w-4 text-black" strokeWidth={2.5} />
-            </div>
-            <span className="font-display text-xl font-black tracking-tighter">
+            <SpeechBubbleLogo className="h-10 w-10 sm:h-11 sm:w-11 animate-flip-2min drop-shadow" />
+            <span className="inline-block font-display text-xl font-black tracking-tighter animate-flip-2min">
               SPARKZ<span className="text-[#e5ff00]">.TV</span>
             </span>
           </Link>
@@ -78,6 +140,27 @@ export default function Navbar() {
         </form>
 
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={toggleTheme}
+            data-testid="theme-toggle-btn"
+            className="flex items-center gap-1.5 border border-[#27272a] bg-black px-2.5 py-1.5 font-mono text-[11px] uppercase font-bold tracking-wider text-zinc-300 hover:border-[#e5ff00] hover:text-[#e5ff00] transition-colors"
+            title={isLight ? "Switch to Original Dark Cyber Theme" : "Switch to Light Theme"}
+            aria-label="Toggle Color Theme"
+          >
+            {isLight ? (
+              <>
+                <Moon className="h-3.5 w-3.5 text-indigo-500" />
+                <span className="hidden sm:inline">DARK</span>
+              </>
+            ) : (
+              <>
+                <Sun className="h-3.5 w-3.5 text-[#e5ff00]" />
+                <span className="hidden sm:inline">LIGHT</span>
+              </>
+            )}
+          </button>
+
           {user === undefined ? null : user ? (
             <>
               <NotificationBell />

@@ -1,0 +1,199 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --ticker-height: 37px;
+  }
+
+  html, body {
+    @apply bg-[#0a0a0a] text-white antialiased;
+    background-color: #0a0a0a !important;
+    color: #ffffff !important;
+    margin: 0;
+    padding: 0;
+    min-height: 100vh;
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+
+  select, input, textarea {
+    background-color: #050505 !important;
+    color: #ffffff !important;
+    border-color: #27272a !important;
+  }
+
+  select option {
+    background-color: #050505 !important;
+    color: #ffffff !important;
+  }
+
+  /* Custom Scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #09090b;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #27272a;
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #3f3f46;
+  }
+}
+
+@keyframes flip-once-2min {
+  0%, 98.8% {
+    transform: perspective(400deg) rotateY(0deg);
+  }
+  99.4% {
+    transform: perspective(400deg) rotateY(180deg);
+  }
+  100% {
+    transform: perspective(400deg) rotateY(360deg);
+  }
+}
+
+.animate-flip-2min {
+  display: inline-block;
+  animation: flip-once-2min 120s ease-in-out infinite;
+  transform-style: preserve-3d;
+  backface-visibility: visible;
+}
+
+@keyframes marquee {
+  0% {
+    transform: translateX(0%);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-marquee,
+.marquee-track {
+  display: flex;
+  white-space: nowrap;
+  animation: marquee 28s linear infinite;
+  will-change: transform;
+}
+
+.animate-marquee:hover,
+.marquee-track:hover,
+.group:hover .marquee-track {
+  animation-play-state: paused;
+}
+
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center justify-center border border-[#e5ff00] bg-[#e5ff00] px-4 py-2 font-mono text-xs font-bold uppercase tracking-wider text-black transition-colors hover:bg-black hover:text-[#e5ff00] disabled:opacity-50;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center justify-center border border-[#27272a] bg-[#080808] px-4 py-2 font-mono text-xs font-bold uppercase tracking-wider text-white transition-colors hover:border-[#e5ff00] hover:text-[#e5ff00] disabled:opacity-50;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center border border-[#27272a] bg-black px-3 py-1.5 font-mono text-xs uppercase tracking-wider text-zinc-300 transition-colors hover:border-[#e5ff00] hover:text-[#e5ff00] disabled:opacity-50;
+  }
+  .input-terminal {
+    @apply w-full border border-[#27272a] bg-[#050505] px-3 py-2 font-mono text-xs text-white placeholder-zinc-500 transition-colors focus:border-[#e5ff00] focus:outline-none focus:ring-0 disabled:opacity-50;
+    background-color: #050505 !important;
+  }
+  .label-caps {
+    @apply font-mono text-[10px] font-bold uppercase tracking-widest text-zinc-400;
+  }
+  .chip {
+    @apply inline-flex items-center border border-[#27272a] bg-[#09090b] px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-zinc-300 transition-colors hover:border-zinc-500 hover:text-white;
+  }
+  .chip.active {
+    @apply border-[#e5ff00] bg-[#e5ff00] text-black;
+  }
+  .live-badge {
+    @apply inline-flex items-center gap-1.5 border border-red-500/50 bg-red-950/40 px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-widest text-red-500;
+  }
+  .dot {
+    @apply h-1.5 w-1.5 rounded-full bg-current;
+  }
+  .live-dot {
+    @apply bg-red-500 animate-pulse;
+  }
+}
+
+/* Light Theme Overrides */
+html.light, html.light body {
+  background-color: #f4f4f5 !important;
+  color: #18181b !important;
+}
+
+html.light select, html.light input, html.light textarea {
+  background-color: #ffffff !important;
+  color: #18181b !important;
+  border-color: #d4d4d8 !important;
+}
+
+html.light select option {
+  background-color: #ffffff !important;
+  color: #18181b !important;
+}
+
+html.light header,
+html.light nav,
+html.light footer,
+html.light .bg-\[\#050505\],
+html.light .bg-\[\#050505\]\/95,
+html.light .bg-\[\#0a0a0a\],
+html.light .bg-\[\#080808\],
+html.light .bg-\[\#0d0d0e\],
+html.light .bg-\[\#121214\],
+html.light .bg-\[\#141416\],
+html.light .bg-\[\#0f0f0f\],
+html.light .bg-black {
+  background-color: #ffffff !important;
+  color: #18181b !important;
+}
+
+html.light .border-\[\#27272a\],
+html.light .border-\[\#333\],
+html.light .border-\[\#27272a\]\/40,
+html.light .border-\[\#27272a\]\/60 {
+  border-color: #e4e4e7 !important;
+}
+
+html.light .text-zinc-200,
+html.light .text-zinc-300,
+html.light .text-white {
+  color: #18181b !important;
+}
+
+html.light .text-zinc-400,
+html.light .text-zinc-500 {
+  color: #71717a !important;
+}
+
+html.light .btn-ghost,
+html.light .btn-secondary {
+  background-color: #f4f4f5 !important;
+  color: #18181b !important;
+  border-color: #d4d4d8 !important;
+}
+
+html.light .input-terminal {
+  background-color: #ffffff !important;
+  color: #18181b !important;
+  border-color: #d4d4d8 !important;
+}
+
+html.light .chip {
+  background-color: #f4f4f5 !important;
+  color: #18181b !important;
+  border-color: #e4e4e7 !important;
+}
+
+html.light ::-webkit-scrollbar-track {
+  background: #f4f4f5;
+}
+html.light ::-webkit-scrollbar-thumb {
+  background: #d4d4d8;
+}

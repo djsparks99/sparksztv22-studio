@@ -73,8 +73,8 @@ export default function FrequencyShoutboxTicker() {
 
   // Combine real shouts with defaults if list is small
   const displayShouts = shouts.length > 0 ? shouts : DEFAULT_SHOUTS;
-  // Duplicate array so marquee scroll is seamless
-  const marqueeItems = [...displayShouts, ...displayShouts];
+  // Duplicate array so marquee scroll is seamless across wide screens
+  const marqueeItems = [...displayShouts, ...displayShouts, ...displayShouts, ...displayShouts];
 
   const handleSubmitShout = async (e) => {
     e.preventDefault();

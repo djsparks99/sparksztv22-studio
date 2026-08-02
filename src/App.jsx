@@ -1,4 +1,3 @@
-import "@/App.css";
 import { useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/lib/auth-context";
@@ -7,6 +6,7 @@ import Navbar from "@/components/Navbar";
 import FrequencyShoutboxTicker from "@/components/FrequencyShoutboxTicker";
 import LiveSidebar from "@/components/LiveSidebar";
 import UsernameLockModal from "@/components/UsernameLockModal";
+import Footer from "@/components/Footer";
 import Browse from "@/pages/Browse";
 import Directory from "@/pages/Directory";
 import Login from "@/pages/Login";
@@ -44,10 +44,11 @@ function useSidebarCollapsed() {
       setCollapsed(localStorage.getItem(SIDEBAR_STORAGE_KEY) === "1");
     };
     window.addEventListener("storage", onStorage);
-    // Also poll on interval since same-tab writes don't fire the storage event
+    window.addEventListener("sidebar-toggle", onStorage);
     const t = setInterval(onStorage, 300);
     return () => {
       window.removeEventListener("storage", onStorage);
+      window.removeEventListener("sidebar-toggle", onStorage);
       clearInterval(t);
     };
   }, []);
@@ -58,12 +59,7 @@ function SiteLayout() {
   const { user } = useAuth();
   const collapsed = useSidebarCollapsed();
   useLivepeerAutoPoll();
-  const hasSidebar = !!user;
-  const sidebarWidthClass = hasSidebar
-    ? collapsed
-      ? "lg:pl-[56px]"
-      : "lg:pl-[240px]"
-    : "";
+  const sidebarWidthClass = collapsed ? "lg:pl-[60px]" : "lg:pl-[240px]";
 
   return (
     <>
@@ -74,17 +70,7 @@ function SiteLayout() {
         <main className="relative z-10">
           <Outlet />
         </main>
-        <footer className="mt-16 border-t border-[#27272a] bg-[#050505]">
-          <div className="mx-auto flex max-w-[1440px] flex-col items-start justify-between gap-4 px-6 py-8 sm:flex-row sm:items-center">
-            <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-zinc-600">
-              © SPARKZ.TV — BROADCASTING FROM SOMEWHERE
-            </div>
-            <div className="flex gap-4 font-mono text-[10px] uppercase tracking-[0.3em] text-zinc-600">
-              <span>PWR: LIVEPEER</span>
-              <span>BUILT LOUD</span>
-            </div>
-          </div>
-        </footer>
+        <Footer />
       </div>
     </>
   );

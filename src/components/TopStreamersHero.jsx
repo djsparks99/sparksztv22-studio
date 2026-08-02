@@ -253,8 +253,8 @@ export default function TopStreamersHero({ allChannels = [] }) {
                       data-testid={`top-streamer-rank-${idx + 1}`}
                       className={`group flex w-full items-center justify-between px-3 py-2.5 text-left transition-colors ${
                         isSelected
-                          ? "bg-[#18181b] border-l-4 border-l-[#e5ff00]"
-                          : "hover:bg-[#121215]"
+                          ? "bg-[#0a0a0a] border-l-4 border-l-[#e5ff00]"
+                          : "hover:bg-[#080808]"
                       }`}
                     >
                       <div className="flex items-center gap-2.5 min-w-0">

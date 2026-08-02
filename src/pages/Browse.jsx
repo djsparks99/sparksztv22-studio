@@ -7,6 +7,7 @@ import { collection, onSnapshot } from "firebase/firestore";
 import ChannelCard from "@/components/ChannelCard";
 import Marquee from "@/components/Marquee";
 import TopStreamersHero from "@/components/TopStreamersHero";
+import StoriesSection from "@/components/StoriesSection";
 import { ArrowRight, Radio, Zap, Heart } from "lucide-react";
 import { useLivepeerAutoPoll } from "@/hooks/useLivepeerAutoPoll";
 import { useMetaTags } from "@/hooks/useMetaTags";
@@ -127,6 +128,9 @@ export default function Browse() {
     <div className="min-h-screen">
       {/* Top Streamers Hero Box */}
       <TopStreamersHero allChannels={rawChannels} />
+
+      {/* 24-Hour Transmissions / Stories Section */}
+      <StoriesSection />
 
       <Marquee items={CATEGORIES.map((c) => c.toUpperCase())} />
 

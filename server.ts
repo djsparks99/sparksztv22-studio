@@ -357,6 +357,19 @@ interface ScheduleItem {
   genre?: string;
 }
 
+interface StoryDoc {
+  id: string;
+  user_uid: string;
+  username: string;
+  display_name: string;
+  user_photo_url: string | null;
+  media_url: string;
+  media_type: "image" | "video";
+  caption: string;
+  created_at: string;
+  expires_at: string;
+}
+
 interface EmoteDoc {
   id: string;
   channel_username: string;
@@ -462,6 +475,7 @@ class InMemStore {
   notifications: NotificationDoc[] = [];
   chatMessages: ChatMessageDoc[] = [];
   emotes: EmoteDoc[] = [];
+  stories: StoryDoc[] = [];
   viewerSessions: ViewerSessionDoc[] = [];
   sessions: RecordingSessionDoc[] = [];
   files: Map<string, FileDoc> = new Map();
@@ -585,6 +599,8 @@ class InMemStore {
     this.channels.set(dubChannel.channel_id, dubChannel);
 
     // Seed Global Platform Emotes & Channel Custom Emotes
+    this.stories = [];
+
     this.emotes = [
       {
         id: "e-glow",
@@ -2058,6 +2074,96 @@ async function startServer() {
     res.json({ ok: true, deleted_id: id });
   });
 
+  // Stories API (24-Hour Expiration Engine)
+  const purgeExpiredStories = () => {
+    const nowTime = Date.now();
+    db.stories = db.stories.filter((s) => {
+      const exp = new Date(s.expires_at).getTime();
+      return exp > nowTime;
+    });
+  };
+
+  api.get("/stories", (req, res) => {
+    purgeExpiredStories();
+    const nowTime = Date.now();
+    const valid = db.stories
+      .map((s) => {
+        const expTime = new Date(s.expires_at).getTime();
+        const timeLeftSec = Math.max(0, Math.floor((expTime - nowTime) / 1000));
+        return {
+          ...s,
+          time_left_sec: timeLeftSec,
+        };
+      })
+      .filter((s) => s.time_left_sec > 0)
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+    res.json(valid);
+  });
+
+  api.post("/stories", requireAuth, upload.single("media"), (req, res) => {
+    const user = (req as any).user as UserDoc;
+    let mediaUrl = req.body?.media_url || "";
+    let mediaType: "image" | "video" = req.body?.media_type === "video" ? "video" : "image";
+
+    if (req.file) {
+      const isVideo = req.file.mimetype.startsWith("video/");
+      mediaType = isVideo ? "video" : "image";
+      const ext = req.file.originalname.split(".").pop() || (isVideo ? "mp4" : "png");
+      const filePath = `stories/${user.uid}/${crypto.randomUUID()}.${ext}`;
+      db.files.set(filePath, {
+        data: req.file.buffer,
+        mimeType: req.file.mimetype || (isVideo ? "video/mp4" : "image/png"),
+      });
+      mediaUrl = `/api/files/${filePath}`;
+    }
+
+    if (!mediaUrl) {
+      return res.status(400).json({ error: "Photo or video media file is required" });
+    }
+
+    const caption = (req.body?.caption || "").trim();
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
+
+    const story: StoryDoc = {
+      id: `story-${crypto.randomUUID()}`,
+      user_uid: user.uid,
+      username: user.username,
+      display_name: user.display_name || user.username,
+      user_photo_url: user.photo_url || null,
+      media_url: mediaUrl,
+      media_type: mediaType,
+      caption,
+      created_at: now.toISOString(),
+      expires_at: expiresAt,
+    };
+
+    db.stories.unshift(story);
+    res.json({
+      ...story,
+      time_left_sec: 24 * 3600,
+    });
+  });
+
+  api.delete("/stories/:id", requireAuth, (req, res) => {
+    const user = (req as any).user as UserDoc;
+    const storyId = req.params.id;
+
+    const idx = db.stories.findIndex((s) => s.id === storyId);
+    if (idx === -1) {
+      return res.status(404).json({ error: "Story not found or expired" });
+    }
+
+    const story = db.stories[idx];
+    if (story.user_uid !== user.uid) {
+      return res.status(403).json({ error: "Not authorized to delete this story" });
+    }
+
+    db.stories.splice(idx, 1);
+    res.json({ ok: true, deleted_id: storyId });
+  });
+
   // Viewer Watts Points System API
   const lastWattsPing = new Map<string, number>();
 
@@ -2187,23 +2293,30 @@ async function startServer() {
     ).toLowerCase();
     const token = url.searchParams.get("token");
 
-    if (!token) {
-      ws.close(4401, "Token required");
-      return;
-    }
-
     let user: UserDoc | null = null;
-    try {
-      const payload = jwt.verify(token, JWT_SECRET) as { sub: string };
-      user = db.users.get(payload.sub) || null;
-    } catch {
-      ws.close(4401, "Invalid token");
-      return;
+    if (token && token !== "guest" && token !== "null" && token !== "undefined") {
+      try {
+        const payload = jwt.verify(token, JWT_SECRET) as { sub: string };
+        user = db.users.get(payload.sub) || null;
+      } catch {
+        // Invalid token, fall through to guest user creation
+      }
     }
 
     if (!user) {
-      ws.close(4401, "User not found");
-      return;
+      const guestNum = Math.floor(1000 + Math.random() * 9000);
+      const guestId = `guest_${crypto.randomBytes(4).toString("hex")}`;
+      user = {
+        uid: guestId,
+        email: `${guestId}@guest.local`,
+        username: `guest_${guestNum}`,
+        display_name: `Guest ${guestNum}`,
+        photo_url: null,
+        bio: "Guest Chatter",
+        password_hash: "",
+        created_at: nowIso(),
+        watts: 250,
+      };
     }
 
     if (!wsRooms.has(channelUsername)) {
