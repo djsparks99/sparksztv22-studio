@@ -29,6 +29,7 @@ export default function Browse() {
   const [category, setCategory] = useState(null);
   const [liveOnly, setLiveOnly] = useState(true);
   const [followingOnly, setFollowingOnly] = useState(false);
+  const [followingList, setFollowingList] = useState([]);
   const [rawChannels, setRawChannels] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -38,6 +39,25 @@ export default function Browse() {
     description: "Discover the finest underground music streams. Join the Signal.",
     image: "/og-image.png",
   });
+
+  useEffect(() => {
+    if (!user) {
+      setFollowingList([]);
+      return;
+    }
+    const fetchFollowing = () => {
+      api.get("/users/mine/following")
+        .then(({ data }) => {
+          if (data && Array.isArray(data.following)) {
+            setFollowingList(data.following.map((u) => u.toLowerCase()));
+          }
+        })
+        .catch(() => {});
+    };
+    fetchFollowing();
+    window.addEventListener("follow-changed", fetchFollowing);
+    return () => window.removeEventListener("follow-changed", fetchFollowing);
+  }, [user]);
 
   useEffect(() => {
     setLoading(true);
@@ -89,6 +109,11 @@ export default function Browse() {
   }, [user]);
 
   let filteredChannels = rawChannels;
+  if (followingOnly) {
+    filteredChannels = filteredChannels.filter((c) =>
+      followingList.includes((c.username || "").toLowerCase())
+    );
+  }
   if (liveOnly) {
     filteredChannels = filteredChannels.filter((c) => Boolean(c.is_live || c.isLive) === true);
   }
