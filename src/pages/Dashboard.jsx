@@ -114,6 +114,7 @@ export default function Dashboard() {
           playback_id: streamData.playbackId || streamData.playback_id || "",
         };
         setChannel(updatedChannelData);
+        setReveal(true);
         toast.success("Livepeer stream generated successfully!");
         return;
       }
@@ -229,19 +230,30 @@ export default function Dashboard() {
               </div>
             </div>
             <div className="space-y-4">
-              <CredentialRow label="RTMP SERVER" value={channel.rtmp_url} onCopy={copy} testid="rtmp-url" />
+              <CredentialRow
+                label="RTMP SERVER"
+                value={channel.rtmp_url || "rtmp://rtmp.livepeer.com/live"}
+                onCopy={copy}
+                testid="rtmp-url"
+              />
               <CredentialRow
                 label="STREAM KEY"
-                value={channel.stream_key}
+                value={channel.stream_key || channel.streamKey || ""}
                 secret={!reveal}
                 onCopy={copy}
                 onToggle={() => setReveal((v) => !v)}
                 reveal={reveal}
+                placeholder="Click 'NEW LIVEPEER KEY' to generate"
                 testid="stream-key"
               />
               <CredentialRow
                 label="PLAYBACK URL"
-                value={channel.playback_url}
+                value={
+                  channel.playback_url ||
+                  (channel.playback_id
+                    ? `https://livepeer.com/playback/${channel.playback_id}/index.m3u8`
+                    : "")
+                }
                 onCopy={copy}
                 testid="playback-url"
               />
@@ -337,37 +349,52 @@ export default function Dashboard() {
   );
 }
 
-function CredentialRow({ label, value, secret, onCopy, onToggle, reveal, testid }) {
-  const display = secret ? "•".repeat(Math.min(value?.length || 12, 24)) : value;
+function CredentialRow({ label, value, secret, onCopy, onToggle, reveal, placeholder, testid }) {
+  const hasValue = Boolean(value);
+  const display = hasValue
+    ? secret
+      ? "•".repeat(Math.min(value.length, 28))
+      : value
+    : placeholder || "Not configured";
+
   return (
     <div>
       <div className="mb-1 flex items-center justify-between">
         <span className="label-caps mb-0">{label}</span>
-        {onToggle && (
+        {onToggle && hasValue && (
           <button
+            type="button"
             data-testid={`${testid}-toggle`}
             onClick={onToggle}
-            className="font-mono text-[10px] uppercase tracking-widest text-zinc-400 hover:text-[#e5ff00]"
+            className="font-mono text-[10px] uppercase tracking-widest text-[#e5ff00] hover:underline cursor-pointer"
           >
-            {reveal ? "HIDE" : "REVEAL"}
+            {reveal ? "[ HIDE ]" : "[ REVEAL KEY ]"}
           </button>
         )}
       </div>
       <div className="flex items-center gap-2">
         <code
           data-testid={testid}
-          className="flex-1 overflow-x-auto whitespace-nowrap border border-[#27272a] bg-black px-3 py-2 font-mono text-[11px] text-zinc-200"
+          className={`flex-1 overflow-x-auto whitespace-nowrap border border-[#27272a] bg-black px-3 py-2 font-mono text-[11px] ${
+            hasValue
+              ? "text-zinc-100 font-bold select-all selection:bg-[#e5ff00] selection:text-black"
+              : "text-zinc-500 italic"
+          }`}
         >
           {display}
         </code>
-        <button
-          data-testid={`${testid}-copy`}
-          onClick={() => onCopy(value, label)}
-          className="btn-ghost"
-          aria-label={`Copy ${label}`}
-        >
-          <Copy className="h-3.5 w-3.5" />
-        </button>
+        {hasValue && (
+          <button
+            type="button"
+            data-testid={`${testid}-copy`}
+            onClick={() => onCopy(value, label)}
+            className="btn-ghost flex items-center gap-1.5 px-3 py-2 text-xs hover:text-[#e5ff00] hover:border-[#e5ff00]"
+            aria-label={`Copy ${label}`}
+          >
+            <Copy className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline font-mono text-[10px] uppercase tracking-wider">COPY</span>
+          </button>
+        )}
       </div>
     </div>
   );
