@@ -365,6 +365,144 @@ async function restoreStoriesFromFirestore() {
   }
 }
 
+async function restoreChannelsFromFirestore() {
+  if (admin && admin.apps && admin.apps.length) {
+    try {
+      const dbFs = admin.firestore();
+      const snap = await dbFs.collection("channels").get();
+      snap.forEach((doc) => {
+        const data = doc.data() as any;
+        if (data && (data.channel_id || data.user_uid) && data.username) {
+          const channelId = data.channel_id || data.user_uid;
+          const channelObj: ChannelDoc = {
+            channel_id: channelId,
+            user_uid: data.user_uid || channelId,
+            username: data.username,
+            display_name: data.display_name || data.username,
+            photo_url: data.photo_url || null,
+            thumbnail_url: data.thumbnail_url || null,
+            livepeer_stream_id: data.livepeer_stream_id || "",
+            stream_key: data.stream_key || "",
+            playback_id: data.playback_id || "",
+            stream_title: data.stream_title || `${data.display_name || data.username}'s Live Stream`,
+            category: data.category || "music",
+            is_live: Boolean(data.is_live ?? data.isLive ?? false),
+            viewer_count: typeof data.viewer_count === "number" ? data.viewer_count : 0,
+            schedule: data.schedule || [],
+            last_updated: data.last_updated || new Date().toISOString(),
+          };
+          db.channels.set(channelId, channelObj);
+        }
+      });
+      console.log(`[restoreChannelsFromFirestore] Restored ${db.channels.size} channel(s) from Firestore.`);
+    } catch (e) {
+      console.error("Error restoring channels from Firestore:", e);
+    }
+  } else if (firebaseConfig.projectId && firebaseConfig.apiKey) {
+    try {
+      const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
+      const listUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents/channels?key=${firebaseConfig.apiKey}&pageSize=300`;
+      const response = await fetch(listUrl);
+      if (response.ok) {
+        const listData = await response.json();
+        if (Array.isArray(listData.documents)) {
+          for (const doc of listData.documents) {
+            const fields = doc.fields || {};
+            const username = fields.username?.stringValue;
+            if (username) {
+              const docName = doc.name || "";
+              const docId = docName.split("/").pop() || "";
+              const channelId = fields.channel_id?.stringValue || fields.user_uid?.stringValue || docId;
+              const channelObj: ChannelDoc = {
+                channel_id: channelId,
+                user_uid: fields.user_uid?.stringValue || channelId,
+                username: username,
+                display_name: fields.display_name?.stringValue || username,
+                photo_url: fields.photo_url?.stringValue || null,
+                thumbnail_url: fields.thumbnail_url?.stringValue || null,
+                livepeer_stream_id: fields.livepeer_stream_id?.stringValue || "",
+                stream_key: fields.stream_key?.stringValue || "",
+                playback_id: fields.playback_id?.stringValue || "",
+                stream_title: fields.stream_title?.stringValue || `${username}'s Live Stream`,
+                category: fields.category?.stringValue || "music",
+                is_live: Boolean(fields.is_live?.booleanValue ?? false),
+                viewer_count: fields.viewer_count?.integerValue ? parseInt(fields.viewer_count.integerValue, 10) : 0,
+                schedule: fields.schedule_json?.stringValue ? JSON.parse(fields.schedule_json.stringValue) : [],
+                last_updated: fields.last_updated?.stringValue || new Date().toISOString(),
+              };
+              db.channels.set(channelId, channelObj);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Error restoring channels via REST fallback:", e);
+    }
+  }
+}
+
+async function syncEmoteToFirestore(emote: EmoteDoc) {
+  if (!emote || !emote.id) return;
+  const emoteData = {
+    id: emote.id,
+    channel_username: emote.channel_username,
+    code: emote.code,
+    name: emote.name,
+    image_url: emote.image_url,
+    created_at: emote.created_at,
+  };
+
+  if (admin && admin.apps && admin.apps.length) {
+    try {
+      await admin.firestore().collection("emotes").doc(emote.id).set(emoteData, { merge: true });
+    } catch (err) {
+      console.error("[syncEmoteToFirestore Admin SDK Error]:", err);
+    }
+  }
+
+  if (firebaseConfig.projectId && firebaseConfig.apiKey) {
+    try {
+      const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
+      const url = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents/emotes/${emote.id}?key=${firebaseConfig.apiKey}`;
+      const fields = {
+        id: { stringValue: emote.id },
+        channel_username: { stringValue: emote.channel_username },
+        code: { stringValue: emote.code },
+        name: { stringValue: emote.name },
+        image_url: { stringValue: emote.image_url },
+        created_at: { stringValue: emote.created_at },
+      };
+      await fetch(url, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fields }),
+      }).catch(() => {});
+    } catch (err) {
+      // non-blocking
+    }
+  }
+}
+
+async function deleteEmoteFromFirestore(id: string) {
+  if (admin && admin.apps && admin.apps.length) {
+    try {
+      await admin.firestore().collection("emotes").doc(id).delete();
+    } catch (err) {
+      console.error("[deleteEmoteFromFirestore Admin SDK Error]:", err);
+    }
+  }
+
+  if (firebaseConfig.projectId && firebaseConfig.apiKey) {
+    try {
+      const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
+      const url = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents/emotes/${id}?key=${firebaseConfig.apiKey}`;
+      await fetch(url, { method: "DELETE" }).catch(() => {});
+    } catch (err) {
+      // non-blocking
+    }
+  }
+}
+
 async function updateFirestoreChannelLiveStatus(docId: string, isLive: boolean, timestamp: string) {
   if (!docId) return;
 
@@ -1121,6 +1259,29 @@ async function findUserByToken(token: string | null): Promise<UserDoc | null> {
         user = u;
         break;
       }
+    }
+  }
+
+  if (!user && admin && admin.apps && admin.apps.length) {
+    try {
+      const dbFs = admin.firestore();
+      const snap = await dbFs.collection("users").doc(uid).get();
+      if (snap.exists) {
+        const data = snap.data() as any;
+        user = {
+          uid: uid,
+          email: data.email || emailFromToken || "",
+          username: data.username || emailFromToken?.split("@")[0] || `user_${uid.slice(0, 6)}`,
+          display_name: data.display_name || nameFromToken || emailFromToken?.split("@")[0] || "User",
+          photo_url: data.photo_url || null,
+          bio: data.bio || "",
+          password_hash: "",
+          created_at: data.created_at || new Date().toISOString(),
+        };
+        db.users.set(user.uid, user);
+      }
+    } catch (err) {
+      console.error("Error in findUserByToken Firebase Admin lookup:", err);
     }
   }
 
@@ -2069,9 +2230,7 @@ async function startServer() {
           syncChannelToFirestore(c).catch(() => {});
         }
       }
-      if (admin && admin.apps && admin.apps.length) {
-        admin.firestore().collection("users").doc(user.uid).set({ photo_url: photoUrl, avatar_url: photoUrl }, { merge: true }).catch(() => {});
-      }
+      syncUserToFirestore(user).catch(() => {});
 
       return res.json({ photo_url: photoUrl, url: photoUrl, avatar_url: photoUrl, user: userPublic(user) });
     } catch (uploadErr: any) {
@@ -2538,6 +2697,7 @@ async function startServer() {
 
   // List channels
   api.get("/channels", async (req, res) => {
+    await restoreChannelsFromFirestore().catch(() => {});
     const { category, live_only, following, q, search } = req.query;
     const searchQuery = String(q || search || "").trim().toLowerCase();
     const user = await authenticateToken(req);
@@ -2979,11 +3139,82 @@ async function startServer() {
   });
 
   // Emotes API
-  api.get("/channels/:username/emotes", (req, res) => {
+  api.get("/channels/:username/emotes", async (req, res) => {
     const uname = req.params.username.toLowerCase();
     const list = db.emotes.filter(
       (e) => e.channel_username === "global" || e.channel_username.toLowerCase() === uname
     );
+
+    if (admin && admin.apps && admin.apps.length) {
+      try {
+        const querySnap = await admin.firestore()
+          .collection("emotes")
+          .where("channel_username", "==", uname)
+          .get();
+        querySnap.forEach((doc) => {
+          const data = doc.data() as any;
+          if (data && !list.some((item) => item.id === data.id)) {
+            list.push({
+              id: data.id || doc.id,
+              channel_username: data.channel_username,
+              code: data.code,
+              name: data.name,
+              image_url: data.image_url,
+              created_at: data.created_at || new Date().toISOString(),
+            });
+          }
+        });
+      } catch (err) {
+        console.error("Error reading emotes from Firestore:", err);
+      }
+    } else if (firebaseConfig.projectId && firebaseConfig.apiKey) {
+      try {
+        const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
+        const url = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents:runQuery?key=${firebaseConfig.apiKey}`;
+        const queryBody = {
+          structuredQuery: {
+            from: [{ collectionId: "emotes" }],
+            where: {
+              fieldFilter: {
+                field: { fieldPath: "channel_username" },
+                op: "EQUAL",
+                value: { stringValue: uname }
+              }
+            }
+          }
+        };
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(queryBody)
+        });
+        if (response.ok) {
+          const results = await response.json();
+          if (Array.isArray(results)) {
+            for (const r of results) {
+              if (r.document && r.document.fields) {
+                const docId = r.document.name.split("/").pop();
+                const fields = r.document.fields;
+                const id = fields.id?.stringValue || docId;
+                if (!list.some((item) => item.id === id)) {
+                  list.push({
+                    id: id,
+                    channel_username: fields.channel_username?.stringValue || uname,
+                    code: fields.code?.stringValue || "",
+                    name: fields.name?.stringValue || "",
+                    image_url: fields.image_url?.stringValue || "",
+                    created_at: fields.created_at?.stringValue || new Date().toISOString(),
+                  });
+                }
+              }
+            }
+          }
+        }
+      } catch (err) {
+        // ignored
+      }
+    }
+
     res.json({ emotes: list });
   });
 
@@ -3047,6 +3278,7 @@ async function startServer() {
         };
 
         db.emotes.push(emoteDoc);
+        await syncEmoteToFirestore(emoteDoc).catch(() => {});
         return res.json({ emote: emoteDoc });
       } catch (uploadErr: any) {
         console.error("Error creating emote:", uploadErr);
@@ -3054,7 +3286,7 @@ async function startServer() {
       }
   });
 
-  api.delete("/channels/mine/emotes/:id", requireAuth, (req, res) => {
+  api.delete("/channels/mine/emotes/:id", requireAuth, async (req, res) => {
     const user = (req as any).user as UserDoc;
     const id = req.params.id;
 
@@ -3069,6 +3301,7 @@ async function startServer() {
     db.emotes = db.emotes.filter(
       (e) => !(e.id === id && e.channel_username.toLowerCase() === channelUsername)
     );
+    await deleteEmoteFromFirestore(id).catch(() => {});
 
     res.json({ ok: true, deleted_id: id });
   });
