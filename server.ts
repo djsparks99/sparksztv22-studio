@@ -56,10 +56,12 @@ if (!process.env.LIVEPEER_API_KEY) {
 // Safely initialize Firebase Admin SDK for server-side admin operations
 try {
   if (admin && admin.apps && Array.isArray(admin.apps) && admin.apps.length === 0) {
+    const bucketName = firebaseConfig.storageBucket || `${firebaseConfig.projectId}.firebasestorage.app`;
     admin.initializeApp({
       projectId: firebaseConfig.projectId,
+      storageBucket: bucketName,
     });
-    console.log(`Firebase Admin SDK initialized successfully for project: "${firebaseConfig.projectId}"`);
+    console.log(`Firebase Admin SDK initialized successfully for project: "${firebaseConfig.projectId}" with storageBucket: "${bucketName}"`);
   }
 } catch (e) {
   console.error("Failed to initialize Firebase Admin SDK (continuing with REST API fallback):", e);
@@ -696,6 +698,38 @@ function saveUploadedFile(filePath: string, buffer: Buffer, mimeType: string) {
   } catch (err) {
     console.warn("Could not save file to disk:", err);
   }
+}
+
+async function uploadToFirebaseStorage(filePath: string, buffer: Buffer, mimeType: string): Promise<string> {
+  // Always run local backup in memory/disk in case admin storage fails or is unconfigured
+  saveUploadedFile(filePath, buffer, mimeType);
+
+  if (admin && admin.apps && admin.apps.length) {
+    try {
+      const bucketName = firebaseConfig.storageBucket || `${firebaseConfig.projectId}.firebasestorage.app`;
+      const bucket = admin.storage().bucket(bucketName);
+      const file = bucket.file(filePath);
+      const downloadToken = crypto.randomUUID();
+
+      await file.save(buffer, {
+        metadata: {
+          contentType: mimeType,
+          metadata: {
+            firebaseStorageDownloadTokens: downloadToken,
+          },
+        },
+      });
+
+      const encodedPath = encodeURIComponent(filePath);
+      const downloadUrl = `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodedPath}?alt=media&token=${downloadToken}`;
+      console.log(`[Firebase Storage] Successfully uploaded to Firebase Storage path "${filePath}". Download URL: "${downloadUrl}"`);
+      return downloadUrl;
+    } catch (storageErr) {
+      console.error("[Firebase Storage] Direct upload error, falling back to local files:", storageErr);
+    }
+  }
+
+  return `/api/files/${filePath}`;
 }
 
 function getUploadedFile(filePath: string): { data: Buffer; mimeType: string } | null {
@@ -2002,8 +2036,7 @@ async function startServer() {
       if (photoFile) {
         const ext = photoFile.originalname ? photoFile.originalname.split(".").pop() : "png";
         const filePath = `avatars/${user.uid}/${crypto.randomUUID()}.${ext}`;
-        saveUploadedFile(filePath, photoFile.buffer, photoFile.mimetype || "image/png");
-        photoUrl = `/api/files/${filePath}`;
+        photoUrl = await uploadToFirebaseStorage(filePath, photoFile.buffer, photoFile.mimetype || "image/png");
       }
 
       if (!photoUrl && (req.body?.file || req.body?.photo || req.body?.avatar || req.body?.image)) {
@@ -2016,8 +2049,7 @@ async function startServer() {
             const buffer = Buffer.from(base64Data, "base64");
             const ext = mimeType.split("/")[1]?.replace(/;.*$/, "") || "png";
             const filePath = `avatars/${user.uid}/${crypto.randomUUID()}.${ext}`;
-            saveUploadedFile(filePath, buffer, mimeType);
-            photoUrl = `/api/files/${filePath}`;
+            photoUrl = await uploadToFirebaseStorage(filePath, buffer, mimeType);
           } else {
             photoUrl = rawStr;
           }
@@ -2110,8 +2142,7 @@ async function startServer() {
       if (thumbFile) {
         const ext = thumbFile.originalname ? thumbFile.originalname.split(".").pop() : "png";
         const filePath = `thumbnails/${user.uid}/${crypto.randomUUID()}.${ext}`;
-        saveUploadedFile(filePath, thumbFile.buffer, thumbFile.mimetype || "image/png");
-        thumbnailUrl = `/api/files/${filePath}`;
+        thumbnailUrl = await uploadToFirebaseStorage(filePath, thumbFile.buffer, thumbFile.mimetype || "image/png");
       }
 
       if (!thumbnailUrl && (req.body?.file || req.body?.thumbnail || req.body?.image)) {
@@ -2124,8 +2155,7 @@ async function startServer() {
             const buffer = Buffer.from(base64Data, "base64");
             const ext = mimeType.split("/")[1]?.replace(/;.*$/, "") || "png";
             const filePath = `thumbnails/${user.uid}/${crypto.randomUUID()}.${ext}`;
-            saveUploadedFile(filePath, buffer, mimeType);
-            thumbnailUrl = `/api/files/${filePath}`;
+            thumbnailUrl = await uploadToFirebaseStorage(filePath, buffer, mimeType);
           } else {
             thumbnailUrl = rawStr;
           }
@@ -2173,8 +2203,7 @@ async function startServer() {
       if (assetFile) {
         const ext = assetFile.originalname ? assetFile.originalname.split(".").pop() : "png";
         const filePath = `assets/${user?.uid || "guest"}/${crypto.randomUUID()}.${ext}`;
-        saveUploadedFile(filePath, assetFile.buffer, assetFile.mimetype || "image/png");
-        assetUrl = `/api/files/${filePath}`;
+        assetUrl = await uploadToFirebaseStorage(filePath, assetFile.buffer, assetFile.mimetype || "image/png");
       }
 
       if (!assetUrl && (req.body?.file || req.body?.image || req.body?.media)) {
@@ -2187,8 +2216,7 @@ async function startServer() {
             const buffer = Buffer.from(base64Data, "base64");
             const ext = mimeType.split("/")[1]?.replace(/;.*$/, "") || "png";
             const filePath = `assets/${user?.uid || "guest"}/${crypto.randomUUID()}.${ext}`;
-            saveUploadedFile(filePath, buffer, mimeType);
-            assetUrl = `/api/files/${filePath}`;
+            assetUrl = await uploadToFirebaseStorage(filePath, buffer, mimeType);
           } else {
             assetUrl = rawStr;
           }
@@ -2970,8 +2998,7 @@ async function startServer() {
       if (emoteFile) {
         const ext = emoteFile.originalname ? emoteFile.originalname.split(".").pop() : "png";
         const filePath = `emotes/${user.uid}/${crypto.randomUUID()}.${ext}`;
-        saveUploadedFile(filePath, emoteFile.buffer, emoteFile.mimetype || "image/png");
-        imageUrl = `/api/files/${filePath}`;
+        imageUrl = await uploadToFirebaseStorage(filePath, emoteFile.buffer, emoteFile.mimetype || "image/png");
       }
 
       if (!imageUrl && (req.body?.file || req.body?.image || req.body?.media)) {
@@ -2984,8 +3011,7 @@ async function startServer() {
             const buffer = Buffer.from(base64Data, "base64");
             const ext = mimeType.split("/")[1]?.replace(/;.*$/, "") || "png";
             const filePath = `emotes/${user.uid}/${crypto.randomUUID()}.${ext}`;
-            saveUploadedFile(filePath, buffer, mimeType);
-            imageUrl = `/api/files/${filePath}`;
+            imageUrl = await uploadToFirebaseStorage(filePath, buffer, mimeType);
           } else {
             imageUrl = rawStr;
           }
@@ -3090,8 +3116,7 @@ async function startServer() {
         mediaType = isVideo ? "video" : "image";
         const ext = (mediaFile.originalname || "").split(".").pop() || (isVideo ? "mp4" : "png");
         const filePath = `stories/${user.uid}/${crypto.randomUUID()}.${ext}`;
-        saveUploadedFile(filePath, mediaFile.buffer, mediaFile.mimetype || (isVideo ? "video/mp4" : "image/png"));
-        mediaUrl = `/api/files/${filePath}`;
+        mediaUrl = await uploadToFirebaseStorage(filePath, mediaFile.buffer, mediaFile.mimetype || (isVideo ? "video/mp4" : "image/png"));
       }
 
       // Support base64 data URL fallback
@@ -3107,8 +3132,7 @@ async function startServer() {
             mediaType = isVideo ? "video" : "image";
             const ext = mimeType.split("/")[1]?.replace(/;.*$/, "") || (isVideo ? "mp4" : "png");
             const filePath = `stories/${user.uid}/${crypto.randomUUID()}.${ext}`;
-            saveUploadedFile(filePath, buffer, mimeType);
-            mediaUrl = `/api/files/${filePath}`;
+            mediaUrl = await uploadToFirebaseStorage(filePath, buffer, mimeType);
           } else {
             mediaUrl = rawStr;
           }
