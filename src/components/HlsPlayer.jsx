@@ -132,17 +132,17 @@ export default function HlsPlayer({
   if (offline) {
     return (
       <div
-        className="video-shell flex flex-col items-center justify-center bg-[#0a0a0a] p-8 text-center"
+        className="video-shell aspect-video w-full flex flex-col items-center justify-center bg-[#0a0a0a] p-4 sm:p-8 text-center border border-[#27272a]"
         data-testid="hls-player-offline"
       >
         <div className="live-badge" style={{ background: "#27272a", color: "#a1a1aa" }}>
           <span className="dot" style={{ background: "#a1a1aa" }} /> OFF AIR
         </div>
-        <div className="mt-6 flex items-center gap-2 font-display text-2xl font-black uppercase tracking-tighter text-zinc-500 sm:text-3xl">
-          <Radio className="h-6 w-6 text-zinc-600" />
+        <div className="mt-4 sm:mt-6 flex items-center gap-2 font-display text-lg sm:text-2xl font-black uppercase tracking-tighter text-zinc-500">
+          <Radio className="h-5 w-5 sm:h-6 sm:w-6 text-zinc-600" />
           BROADCASTER IS OFFLINE
         </div>
-        <div className="mt-2 max-w-md font-mono text-xs text-zinc-600">
+        <div className="mt-2 max-w-md font-mono text-[10px] sm:text-xs text-zinc-600 px-2">
           The stream will resume automatically the second the DJ starts pushing.
         </div>
       </div>
@@ -152,7 +152,7 @@ export default function HlsPlayer({
   return (
     <div
       ref={playerRef}
-      className="video-shell group relative overflow-hidden bg-black"
+      className="video-shell aspect-video w-full group relative overflow-hidden bg-black border border-[#27272a]"
       data-testid="hls-player"
     >
       {/* Video Element */}

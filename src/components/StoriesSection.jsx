@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
-import { api, fileUrl, apiErrorMessage } from "@/lib/api";
+import { api, fileUrl, apiErrorMessage, fileToBase64 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import {
   Plus,
@@ -155,12 +155,13 @@ export default function StoriesSection() {
                   className="group relative flex flex-col items-center gap-2 flex-shrink-0 cursor-pointer text-left"
                 >
                   <div className="relative p-0.5 rounded-full border-2 border-[#e5ff00] shadow-[0_0_10px_rgba(229,255,0,0.4)] group-hover:scale-105 group-hover:shadow-[0_0_16px_rgba(229,255,0,0.8)] transition-all">
-                    <div className="h-15 w-15 overflow-hidden rounded-full bg-zinc-900 border border-black">
+                    <div className="h-16 w-16 overflow-hidden rounded-full bg-zinc-900 border border-black flex items-center justify-center">
                       {story.user_photo_url ? (
                         <img
                           src={fileUrl(story.user_photo_url)}
                           alt={story.display_name}
                           className="h-full w-full object-cover"
+                          style={{ objectFit: "cover", width: "100%", height: "100%" }}
                         />
                       ) : (
                         <div className="flex h-full w-full items-center justify-center font-mono font-bold text-sm text-[#e5ff00] bg-zinc-950">
@@ -380,7 +381,7 @@ function StoryViewerModal({
         </div>
 
         {/* Media Content */}
-        <div className="relative flex-1 bg-black flex items-center justify-center overflow-hidden">
+        <div className="relative flex-1 bg-black flex items-center justify-center overflow-hidden" style={{ overflow: "hidden" }}>
           {story.media_type === "video" ? (
             <video
               src={fileUrl(story.media_url)}
@@ -389,12 +390,14 @@ function StoryViewerModal({
               loop={false}
               className="h-full w-full object-contain"
               onEnded={nextStory}
+              style={{ objectFit: "contain", width: "100%", height: "100%", maxHeight: "100%", maxWidth: "100%" }}
             />
           ) : (
             <img
               src={fileUrl(story.media_url)}
               alt="Story Transmission"
               className="h-full w-full object-cover"
+              style={{ objectFit: "cover", width: "100%", height: "100%", maxHeight: "100%", maxWidth: "100%" }}
             />
           )}
 
@@ -477,12 +480,14 @@ function CreateStoryModal({ onClose, onSuccess }) {
 
     try {
       setUploading(true);
-      const formData = new FormData();
-      formData.append("media", file);
-      formData.append("caption", caption);
-      formData.append("media_type", mediaType);
-
-      await api.post("/stories", formData);
+      const base64 = await fileToBase64(file);
+      await api.post("/stories", {
+        media: base64,
+        file: base64,
+        caption,
+        media_type: mediaType,
+        filename: file.name
+      });
 
       toast.success("24-Hour Story Published! ⚡");
       onSuccess();

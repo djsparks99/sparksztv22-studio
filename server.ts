@@ -1940,91 +1940,97 @@ async function startServer() {
     api.post(ep, requireAuth, handleProfileUpdate);
   });
 
-  // Upload user photo / avatar
-  const handleUserPhotoUpload = (req: Request, res: Response) => {
-    const processUpload = async () => {
-      try {
-        const user = (req as any).user as UserDoc;
-        let photoUrl = req.body?.photo_url || req.body?.imageUrl || req.body?.avatar_url || req.body?.url || "";
-
-        const filesList = (req as any).files || (req.file ? [req.file] : []);
-        const photoFile = filesList.find((f: any) => f.fieldname === "file" || f.fieldname === "photo" || f.fieldname === "avatar" || f.fieldname === "image" || f.fieldname === "media") || filesList[0];
-
-        if (photoFile) {
-          const ext = photoFile.originalname ? photoFile.originalname.split(".").pop() : "png";
-          const filePath = `avatars/${user.uid}/${crypto.randomUUID()}.${ext}`;
-          saveUploadedFile(filePath, photoFile.buffer, photoFile.mimetype || "image/png");
-          photoUrl = `/api/files/${filePath}`;
+  const flexibleUpload = (req: Request, res: Response, next: NextFunction) => {
+    if (
+      req.is("application/json") ||
+      req.is("json") ||
+      (req.body && typeof req.body === "object" && Object.keys(req.body).length > 0)
+    ) {
+      return next();
+    }
+    upload.any()(req, res, (err: any) => {
+      if (err) {
+        console.error("Multer error during upload:", err);
+        if (err instanceof multer.MulterError) {
+          return res.status(400).json({ error: `File upload error: ${err.message}` });
         }
+        return res.status(400).json({ error: err.message || "Upload failed" });
+      }
+      next();
+    });
+  };
 
-        if (!photoUrl && (req.body?.file || req.body?.photo || req.body?.avatar || req.body?.image)) {
-          const rawStr = String(req.body.file || req.body.photo || req.body.avatar || req.body.image);
-          if (rawStr.startsWith("data:")) {
-            const matches = rawStr.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
-            if (matches && matches.length === 3) {
-              const mimeType = matches[1];
-              const base64Data = matches[2];
-              const buffer = Buffer.from(base64Data, "base64");
-              const ext = mimeType.split("/")[1] || "png";
-              const filePath = `avatars/${user.uid}/${crypto.randomUUID()}.${ext}`;
-              saveUploadedFile(filePath, buffer, mimeType);
-              photoUrl = `/api/files/${filePath}`;
-            } else {
-              photoUrl = rawStr;
-            }
+  // Upload user photo / avatar
+  const handleUserPhotoUpload = async (req: Request, res: Response) => {
+    try {
+      const user = (req as any).user as UserDoc;
+      let photoUrl = req.body?.photo_url || req.body?.imageUrl || req.body?.avatar_url || req.body?.url || "";
+
+      const filesList = (req as any).files || (req.file ? [req.file] : []);
+      const photoFile = filesList.find((f: any) => f.fieldname === "file" || f.fieldname === "photo" || f.fieldname === "avatar" || f.fieldname === "image" || f.fieldname === "media") || filesList[0];
+
+      if (photoFile) {
+        const ext = photoFile.originalname ? photoFile.originalname.split(".").pop() : "png";
+        const filePath = `avatars/${user.uid}/${crypto.randomUUID()}.${ext}`;
+        saveUploadedFile(filePath, photoFile.buffer, photoFile.mimetype || "image/png");
+        photoUrl = `/api/files/${filePath}`;
+      }
+
+      if (!photoUrl && (req.body?.file || req.body?.photo || req.body?.avatar || req.body?.image)) {
+        const rawStr = String(req.body.file || req.body.photo || req.body.avatar || req.body.image);
+        if (rawStr.startsWith("data:")) {
+          const matches = rawStr.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+          if (matches && matches.length === 3) {
+            const mimeType = matches[1];
+            const base64Data = matches[2];
+            const buffer = Buffer.from(base64Data, "base64");
+            const ext = mimeType.split("/")[1]?.replace(/;.*$/, "") || "png";
+            const filePath = `avatars/${user.uid}/${crypto.randomUUID()}.${ext}`;
+            saveUploadedFile(filePath, buffer, mimeType);
+            photoUrl = `/api/files/${filePath}`;
           } else {
             photoUrl = rawStr;
           }
+        } else {
+          photoUrl = rawStr;
         }
-
-        if (!photoUrl) {
-          return res.status(400).json({ error: "Image file or photo_url is required" });
-        }
-
-        user.photo_url = photoUrl;
-        for (const c of db.channels.values()) {
-          if (c.user_uid === user.uid) {
-            c.photo_url = photoUrl;
-            syncChannelToFirestore(c).catch(() => {});
-          }
-        }
-        if (admin && admin.apps && admin.apps.length) {
-          admin.firestore().collection("users").doc(user.uid).set({ photo_url: photoUrl, avatar_url: photoUrl }, { merge: true }).catch(() => {});
-        }
-
-        return res.json({ photo_url: photoUrl, url: photoUrl, avatar_url: photoUrl, user: userPublic(user) });
-      } catch (uploadErr: any) {
-        console.error("Error uploading user photo:", uploadErr);
-        return res.status(500).json({ error: uploadErr?.message || "Upload photo failed" });
       }
-    };
 
-    if ((req as any).files || req.file) {
-      processUpload();
-    } else {
-      upload.any()(req, res, (err: any) => {
-        if (err) {
-          console.error("Multer error during photo upload:", err);
-          return res.status(400).json({ error: err.message || "Failed to upload photo" });
+      if (!photoUrl) {
+        return res.status(400).json({ error: "Image file or photo_url is required" });
+      }
+
+      user.photo_url = photoUrl;
+      for (const c of db.channels.values()) {
+        if (c.user_uid === user.uid) {
+          c.photo_url = photoUrl;
+          syncChannelToFirestore(c).catch(() => {});
         }
-        processUpload();
-      });
+      }
+      if (admin && admin.apps && admin.apps.length) {
+        admin.firestore().collection("users").doc(user.uid).set({ photo_url: photoUrl, avatar_url: photoUrl }, { merge: true }).catch(() => {});
+      }
+
+      return res.json({ photo_url: photoUrl, url: photoUrl, avatar_url: photoUrl, user: userPublic(user) });
+    } catch (uploadErr: any) {
+      console.error("Error uploading user photo:", uploadErr);
+      return res.status(500).json({ error: uploadErr?.message || "Upload photo failed" });
     }
   };
 
   const registerUploadRoute = (paths: string[], handler: any) => {
     paths.forEach((p) => {
       const cleanP = p.startsWith("/") ? p : `/${p}`;
-      api.post(cleanP, upload.any(), requireAuth, handler);
-      api.put(cleanP, upload.any(), requireAuth, handler);
-      api.patch(cleanP, upload.any(), requireAuth, handler);
-      app.post(cleanP, upload.any(), requireAuth, handler);
-      app.put(cleanP, upload.any(), requireAuth, handler);
-      app.patch(cleanP, upload.any(), requireAuth, handler);
+      api.post(cleanP, flexibleUpload, requireAuth, handler);
+      api.put(cleanP, flexibleUpload, requireAuth, handler);
+      api.patch(cleanP, flexibleUpload, requireAuth, handler);
+      app.post(cleanP, flexibleUpload, requireAuth, handler);
+      app.put(cleanP, flexibleUpload, requireAuth, handler);
+      app.patch(cleanP, flexibleUpload, requireAuth, handler);
       if (!cleanP.startsWith("/api")) {
-        app.post(`/api${cleanP}`, upload.any(), requireAuth, handler);
-        app.put(`/api${cleanP}`, upload.any(), requireAuth, handler);
-        app.patch(`/api${cleanP}`, upload.any(), requireAuth, handler);
+        app.post(`/api${cleanP}`, flexibleUpload, requireAuth, handler);
+        app.put(`/api${cleanP}`, flexibleUpload, requireAuth, handler);
+        app.patch(`/api${cleanP}`, flexibleUpload, requireAuth, handler);
       }
     });
   };
@@ -2053,71 +2059,65 @@ async function startServer() {
   );
 
   // Upload channel thumbnail
-  const handleThumbnailUpload = (req: Request, res: Response) => {
-    upload.any()(req, res, async (err: any) => {
-      if (err) {
-        console.error("Multer error during thumbnail upload:", err);
-        return res.status(400).json({ error: err.message || "Failed to upload thumbnail" });
+  const handleThumbnailUpload = async (req: Request, res: Response) => {
+    try {
+      const user = (req as any).user as UserDoc;
+      let targetChannel: ChannelDoc | null = null;
+      for (const c of db.channels.values()) {
+        if (c.user_uid === user.uid) {
+          targetChannel = c;
+          break;
+        }
       }
-      try {
-        const user = (req as any).user as UserDoc;
-        let targetChannel: ChannelDoc | null = null;
-        for (const c of db.channels.values()) {
-          if (c.user_uid === user.uid) {
-            targetChannel = c;
-            break;
-          }
-        }
-        if (!targetChannel) {
-          return res.status(404).json({ error: "Channel not found" });
-        }
+      if (!targetChannel) {
+        return res.status(404).json({ error: "Channel not found" });
+      }
 
-        let thumbnailUrl = req.body?.thumbnail_url || req.body?.imageUrl || req.body?.image_url || req.body?.url || "";
-        const filesList = (req as any).files || (req.file ? [req.file] : []);
-        const thumbFile = filesList.find((f: any) => f.fieldname === "file" || f.fieldname === "thumbnail" || f.fieldname === "image") || filesList[0];
+      let thumbnailUrl = req.body?.thumbnail_url || req.body?.imageUrl || req.body?.image_url || req.body?.url || "";
+      const filesList = (req as any).files || (req.file ? [req.file] : []);
+      const thumbFile = filesList.find((f: any) => f.fieldname === "file" || f.fieldname === "thumbnail" || f.fieldname === "image") || filesList[0];
 
-        if (thumbFile) {
-          const ext = thumbFile.originalname ? thumbFile.originalname.split(".").pop() : "png";
-          const filePath = `thumbnails/${user.uid}/${crypto.randomUUID()}.${ext}`;
-          saveUploadedFile(filePath, thumbFile.buffer, thumbFile.mimetype || "image/png");
-          thumbnailUrl = `/api/files/${filePath}`;
-        }
+      if (thumbFile) {
+        const ext = thumbFile.originalname ? thumbFile.originalname.split(".").pop() : "png";
+        const filePath = `thumbnails/${user.uid}/${crypto.randomUUID()}.${ext}`;
+        saveUploadedFile(filePath, thumbFile.buffer, thumbFile.mimetype || "image/png");
+        thumbnailUrl = `/api/files/${filePath}`;
+      }
 
-        if (!thumbnailUrl && (req.body?.file || req.body?.thumbnail || req.body?.image)) {
-          const rawStr = String(req.body.file || req.body.thumbnail || req.body.image);
-          if (rawStr.startsWith("data:")) {
-            const matches = rawStr.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
-            if (matches && matches.length === 3) {
-              const mimeType = matches[1];
-              const base64Data = matches[2];
-              const buffer = Buffer.from(base64Data, "base64");
-              const ext = mimeType.split("/")[1] || "png";
-              const filePath = `thumbnails/${user.uid}/${crypto.randomUUID()}.${ext}`;
-              saveUploadedFile(filePath, buffer, mimeType);
-              thumbnailUrl = `/api/files/${filePath}`;
-            } else {
-              thumbnailUrl = rawStr;
-            }
+      if (!thumbnailUrl && (req.body?.file || req.body?.thumbnail || req.body?.image)) {
+        const rawStr = String(req.body.file || req.body.thumbnail || req.body.image);
+        if (rawStr.startsWith("data:")) {
+          const matches = rawStr.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+          if (matches && matches.length === 3) {
+            const mimeType = matches[1];
+            const base64Data = matches[2];
+            const buffer = Buffer.from(base64Data, "base64");
+            const ext = mimeType.split("/")[1]?.replace(/;.*$/, "") || "png";
+            const filePath = `thumbnails/${user.uid}/${crypto.randomUUID()}.${ext}`;
+            saveUploadedFile(filePath, buffer, mimeType);
+            thumbnailUrl = `/api/files/${filePath}`;
           } else {
             thumbnailUrl = rawStr;
           }
+        } else {
+          thumbnailUrl = rawStr;
         }
-
-        if (!thumbnailUrl) {
-          return res.status(400).json({ error: "Image file or thumbnail_url is required" });
-        }
-
-        targetChannel.thumbnail_url = thumbnailUrl;
-        targetChannel.last_updated = nowIso();
-        db.channels.set(targetChannel.channel_id, targetChannel);
-        await syncChannelToFirestore(targetChannel).catch(() => {});
-
-        return res.json({ thumbnail_url: thumbnailUrl, url: thumbnailUrl });
-      } catch (uploadErr: any) {
-        console.error("Error uploading thumbnail:", uploadErr);
-        return res.status(500).json({ error: uploadErr?.message || "Failed to upload thumbnail" });
       }
-    });
+
+      if (!thumbnailUrl) {
+        return res.status(400).json({ error: "Image file or thumbnail_url is required" });
+      }
+
+      targetChannel.thumbnail_url = thumbnailUrl;
+      targetChannel.last_updated = nowIso();
+      db.channels.set(targetChannel.channel_id, targetChannel);
+      await syncChannelToFirestore(targetChannel).catch(() => {});
+
+      return res.json({ thumbnail_url: thumbnailUrl, url: thumbnailUrl });
+    } catch (uploadErr: any) {
+      console.error("Error uploading thumbnail:", uploadErr);
+      return res.status(500).json({ error: uploadErr?.message || "Failed to upload thumbnail" });
+    }
   };
 
   registerUploadRoute(
@@ -2132,56 +2132,50 @@ async function startServer() {
   );
 
   // Generic Asset Upload Endpoint
-  const handleGenericAssetUpload = (req: Request, res: Response) => {
-    upload.any()(req, res, async (err: any) => {
-      if (err) {
-        console.error("Multer error during asset upload:", err);
-        return res.status(400).json({ error: err.message || "Failed to upload asset" });
+  const handleGenericAssetUpload = async (req: Request, res: Response) => {
+    try {
+      const user = (req as any).user as UserDoc;
+      let assetUrl = req.body?.url || req.body?.image_url || req.body?.photo_url || "";
+
+      const filesList = (req as any).files || (req.file ? [req.file] : []);
+      const assetFile = filesList[0];
+
+      if (assetFile) {
+        const ext = assetFile.originalname ? assetFile.originalname.split(".").pop() : "png";
+        const filePath = `assets/${user?.uid || "guest"}/${crypto.randomUUID()}.${ext}`;
+        saveUploadedFile(filePath, assetFile.buffer, assetFile.mimetype || "image/png");
+        assetUrl = `/api/files/${filePath}`;
       }
-      try {
-        const user = (req as any).user as UserDoc;
-        let assetUrl = req.body?.url || req.body?.image_url || req.body?.photo_url || "";
 
-        const filesList = (req as any).files || (req.file ? [req.file] : []);
-        const assetFile = filesList[0];
-
-        if (assetFile) {
-          const ext = assetFile.originalname ? assetFile.originalname.split(".").pop() : "png";
-          const filePath = `assets/${user?.uid || "guest"}/${crypto.randomUUID()}.${ext}`;
-          saveUploadedFile(filePath, assetFile.buffer, assetFile.mimetype || "image/png");
-          assetUrl = `/api/files/${filePath}`;
-        }
-
-        if (!assetUrl && (req.body?.file || req.body?.image || req.body?.media)) {
-          const rawStr = String(req.body.file || req.body.image || req.body.media);
-          if (rawStr.startsWith("data:")) {
-            const matches = rawStr.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
-            if (matches && matches.length === 3) {
-              const mimeType = matches[1];
-              const base64Data = matches[2];
-              const buffer = Buffer.from(base64Data, "base64");
-              const ext = mimeType.split("/")[1] || "png";
-              const filePath = `assets/${user?.uid || "guest"}/${crypto.randomUUID()}.${ext}`;
-              saveUploadedFile(filePath, buffer, mimeType);
-              assetUrl = `/api/files/${filePath}`;
-            } else {
-              assetUrl = rawStr;
-            }
+      if (!assetUrl && (req.body?.file || req.body?.image || req.body?.media)) {
+        const rawStr = String(req.body.file || req.body.image || req.body.media);
+        if (rawStr.startsWith("data:")) {
+          const matches = rawStr.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+          if (matches && matches.length === 3) {
+            const mimeType = matches[1];
+            const base64Data = matches[2];
+            const buffer = Buffer.from(base64Data, "base64");
+            const ext = mimeType.split("/")[1]?.replace(/;.*$/, "") || "png";
+            const filePath = `assets/${user?.uid || "guest"}/${crypto.randomUUID()}.${ext}`;
+            saveUploadedFile(filePath, buffer, mimeType);
+            assetUrl = `/api/files/${filePath}`;
           } else {
             assetUrl = rawStr;
           }
+        } else {
+          assetUrl = rawStr;
         }
-
-        if (!assetUrl) {
-          return res.status(400).json({ error: "File or url is required" });
-        }
-
-        return res.json({ url: assetUrl, photo_url: assetUrl, thumbnail_url: assetUrl, image_url: assetUrl });
-      } catch (uploadErr: any) {
-        console.error("Error uploading asset:", uploadErr);
-        return res.status(500).json({ error: uploadErr?.message || "Upload asset failed" });
       }
-    });
+
+      if (!assetUrl) {
+        return res.status(400).json({ error: "File or asset URL is required" });
+      }
+
+      return res.json({ url: assetUrl, image_url: assetUrl, photo_url: assetUrl, thumbnail_url: assetUrl });
+    } catch (uploadErr: any) {
+      console.error("Error uploading asset:", uploadErr);
+      return res.status(500).json({ error: uploadErr?.message || "Failed to upload asset" });
+    }
   };
 
   registerUploadRoute(["/assets/upload", "/assets/upload/", "/upload", "/upload/"], handleGenericAssetUpload);
@@ -2735,56 +2729,44 @@ async function startServer() {
     res.json({ emotes: list });
   });
 
-  api.post("/channels/mine/emotes", requireAuth, (req, res) => {
-    upload.any()(req, res, async (err: any) => {
-      if (err) {
-        console.error("Multer error during emote upload:", err);
-        if (err instanceof multer.MulterError) {
-          if (err.code === "LIMIT_FILE_SIZE") {
-            return res.status(400).json({ error: "File size exceeds limit" });
-          }
-          return res.status(400).json({ error: `File upload error: ${err.message}` });
-        }
-        return res.status(400).json({ error: err.message || "Failed to upload emote" });
+  api.post("/channels/mine/emotes", flexibleUpload, requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user as UserDoc;
+      let imageUrl = req.body?.image_url || req.body?.imageUrl || "";
+
+      const filesList = (req as any).files || (req.file ? [req.file] : []);
+      const emoteFile = filesList.find((f: any) => f.fieldname === "file" || f.fieldname === "image" || f.fieldname === "media") || filesList[0];
+
+      if (emoteFile) {
+        const ext = emoteFile.originalname ? emoteFile.originalname.split(".").pop() : "png";
+        const filePath = `emotes/${user.uid}/${crypto.randomUUID()}.${ext}`;
+        saveUploadedFile(filePath, emoteFile.buffer, emoteFile.mimetype || "image/png");
+        imageUrl = `/api/files/${filePath}`;
       }
 
-      try {
-        const user = (req as any).user as UserDoc;
-        let imageUrl = req.body?.image_url || req.body?.imageUrl || "";
-
-        const filesList = (req as any).files || (req.file ? [req.file] : []);
-        const emoteFile = filesList.find((f: any) => f.fieldname === "file" || f.fieldname === "image" || f.fieldname === "media") || filesList[0];
-
-        if (emoteFile) {
-          const ext = emoteFile.originalname ? emoteFile.originalname.split(".").pop() : "png";
-          const filePath = `emotes/${user.uid}/${crypto.randomUUID()}.${ext}`;
-          saveUploadedFile(filePath, emoteFile.buffer, emoteFile.mimetype || "image/png");
-          imageUrl = `/api/files/${filePath}`;
-        }
-
-        if (!imageUrl && (req.body?.file || req.body?.image || req.body?.media)) {
-          const rawStr = String(req.body.file || req.body.image || req.body.media);
-          if (rawStr.startsWith("data:")) {
-            const matches = rawStr.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
-            if (matches && matches.length === 3) {
-              const mimeType = matches[1];
-              const base64Data = matches[2];
-              const buffer = Buffer.from(base64Data, "base64");
-              const ext = mimeType.split("/")[1] || "png";
-              const filePath = `emotes/${user.uid}/${crypto.randomUUID()}.${ext}`;
-              saveUploadedFile(filePath, buffer, mimeType);
-              imageUrl = `/api/files/${filePath}`;
-            } else {
-              imageUrl = rawStr;
-            }
+      if (!imageUrl && (req.body?.file || req.body?.image || req.body?.media)) {
+        const rawStr = String(req.body.file || req.body.image || req.body.media);
+        if (rawStr.startsWith("data:")) {
+          const matches = rawStr.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+          if (matches && matches.length === 3) {
+            const mimeType = matches[1];
+            const base64Data = matches[2];
+            const buffer = Buffer.from(base64Data, "base64");
+            const ext = mimeType.split("/")[1]?.replace(/;.*$/, "") || "png";
+            const filePath = `emotes/${user.uid}/${crypto.randomUUID()}.${ext}`;
+            saveUploadedFile(filePath, buffer, mimeType);
+            imageUrl = `/api/files/${filePath}`;
           } else {
             imageUrl = rawStr;
           }
+        } else {
+          imageUrl = rawStr;
         }
+      }
 
-        if (!imageUrl) {
-          return res.status(400).json({ error: "Image file or image_url required" });
-        }
+      if (!imageUrl) {
+        return res.status(400).json({ error: "Image file or image_url required" });
+      }
 
         let rawCode = (req.body?.code || "custom").trim().replace(/[^a-zA-Z0-9_]/g, "");
         if (!rawCode) rawCode = "emote";
@@ -2814,7 +2796,6 @@ async function startServer() {
         console.error("Error creating emote:", uploadErr);
         return res.status(500).json({ error: uploadErr?.message || "Failed to upload emote" });
       }
-    });
   });
 
   api.delete("/channels/mine/emotes/:id", requireAuth, (req, res) => {
@@ -2864,93 +2845,80 @@ async function startServer() {
     res.json(valid);
   });
 
-  const handleStoryUpload = (req: Request, res: Response) => {
-    upload.any()(req, res, async (err: any) => {
-      if (err) {
-        console.error("Multer error during story upload:", err);
-        if (err instanceof multer.MulterError) {
-          if (err.code === "LIMIT_FILE_SIZE") {
-            return res.status(400).json({ error: "File size exceeds 50MB limit" });
-          }
-          return res.status(400).json({ error: `File upload error: ${err.message}` });
-        }
-        return res.status(400).json({ error: err.message || "Failed to upload story file" });
+  const handleStoryUpload = async (req: Request, res: Response) => {
+    try {
+      const user = (req as any).user as UserDoc;
+      let mediaUrl = req.body?.media_url || "";
+      let mediaType: "image" | "video" = req.body?.media_type === "video" ? "video" : "image";
+
+      // Check req.files array (from upload.any()) or req.file
+      const filesList = (req as any).files || (req.file ? [req.file] : []);
+      const mediaFile = filesList.find((f: any) => f.fieldname === "media" || f.fieldname === "file") || filesList[0];
+
+      if (mediaFile) {
+        const isVideo = mediaFile.mimetype ? mediaFile.mimetype.startsWith("video/") : false;
+        mediaType = isVideo ? "video" : "image";
+        const ext = (mediaFile.originalname || "").split(".").pop() || (isVideo ? "mp4" : "png");
+        const filePath = `stories/${user.uid}/${crypto.randomUUID()}.${ext}`;
+        saveUploadedFile(filePath, mediaFile.buffer, mediaFile.mimetype || (isVideo ? "video/mp4" : "image/png"));
+        mediaUrl = `/api/files/${filePath}`;
       }
 
-      try {
-        const user = (req as any).user as UserDoc;
-        let mediaUrl = req.body?.media_url || "";
-        let mediaType: "image" | "video" = req.body?.media_type === "video" ? "video" : "image";
-
-        // Check req.files array (from upload.any()) or req.file
-        const filesList = (req as any).files || (req.file ? [req.file] : []);
-        const mediaFile = filesList.find((f: any) => f.fieldname === "media" || f.fieldname === "file") || filesList[0];
-
-        if (mediaFile) {
-          const isVideo = mediaFile.mimetype ? mediaFile.mimetype.startsWith("video/") : false;
-          mediaType = isVideo ? "video" : "image";
-          const ext = (mediaFile.originalname || "").split(".").pop() || (isVideo ? "mp4" : "png");
-          const filePath = `stories/${user.uid}/${crypto.randomUUID()}.${ext}`;
-          saveUploadedFile(filePath, mediaFile.buffer, mediaFile.mimetype || (isVideo ? "video/mp4" : "image/png"));
-          mediaUrl = `/api/files/${filePath}`;
-        }
-
-        // Support base64 data URL fallback
-        if (!mediaUrl && (req.body?.media || req.body?.media_url || req.body?.file)) {
-          const rawStr = String(req.body.media || req.body.media_url || req.body.file);
-          if (rawStr.startsWith("data:")) {
-            const matches = rawStr.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
-            if (matches && matches.length === 3) {
-              const mimeType = matches[1];
-              const base64Data = matches[2];
-              const buffer = Buffer.from(base64Data, "base64");
-              const isVideo = mimeType.startsWith("video/");
-              mediaType = isVideo ? "video" : "image";
-              const ext = mimeType.split("/")[1] || (isVideo ? "mp4" : "png");
-              const filePath = `stories/${user.uid}/${crypto.randomUUID()}.${ext}`;
-              saveUploadedFile(filePath, buffer, mimeType);
-              mediaUrl = `/api/files/${filePath}`;
-            } else {
-              mediaUrl = rawStr;
-            }
+      // Support base64 data URL fallback
+      if (!mediaUrl && (req.body?.media || req.body?.media_url || req.body?.file)) {
+        const rawStr = String(req.body.media || req.body.media_url || req.body.file);
+        if (rawStr.startsWith("data:")) {
+          const matches = rawStr.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+          if (matches && matches.length === 3) {
+            const mimeType = matches[1];
+            const base64Data = matches[2];
+            const buffer = Buffer.from(base64Data, "base64");
+            const isVideo = mimeType.startsWith("video/");
+            mediaType = isVideo ? "video" : "image";
+            const ext = mimeType.split("/")[1]?.replace(/;.*$/, "") || (isVideo ? "mp4" : "png");
+            const filePath = `stories/${user.uid}/${crypto.randomUUID()}.${ext}`;
+            saveUploadedFile(filePath, buffer, mimeType);
+            mediaUrl = `/api/files/${filePath}`;
           } else {
             mediaUrl = rawStr;
           }
+        } else {
+          mediaUrl = rawStr;
         }
-
-        if (!mediaUrl) {
-          return res.status(400).json({ error: "Photo or video media file is required" });
-        }
-
-        const caption = (req.body?.caption || "").trim();
-        const now = new Date();
-        const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
-
-        const story: StoryDoc = {
-          id: `story-${crypto.randomUUID()}`,
-          user_uid: user.uid,
-          username: user.username,
-          display_name: user.display_name || user.username,
-          user_photo_url: user.photo_url || null,
-          media_url: mediaUrl,
-          media_type: mediaType,
-          caption,
-          created_at: now.toISOString(),
-          expires_at: expiresAt,
-        };
-
-        db.stories.unshift(story);
-        syncStoryToFirestore(story).catch(() => {});
-
-        return res.json({
-          ...story,
-          time_left_sec: 24 * 3600,
-        });
-      } catch (uploadErr: any) {
-        console.error("Error creating story:", uploadErr);
-        return res.status(500).json({ error: uploadErr?.message || "Failed to create story" });
       }
-    });
+
+      if (!mediaUrl) {
+        return res.status(400).json({ error: "Photo or video media file is required" });
+      }
+
+      const caption = (req.body?.caption || "").trim();
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
+
+      const story: StoryDoc = {
+        id: `story-${crypto.randomUUID()}`,
+        user_uid: user.uid,
+        username: user.username,
+        display_name: user.display_name || user.username,
+        user_photo_url: user.photo_url || null,
+        media_url: mediaUrl,
+        media_type: mediaType,
+        caption,
+        created_at: now.toISOString(),
+        expires_at: expiresAt,
+      };
+
+      db.stories.unshift(story);
+      syncStoryToFirestore(story).catch(() => {});
+
+      return res.json({
+        ...story,
+        time_left_sec: 24 * 3600,
+      });
+    } catch (uploadErr: any) {
+      console.error("Error creating story:", uploadErr);
+      return res.status(500).json({ error: uploadErr?.message || "Failed to create story" });
+    }
   };
 
   registerUploadRoute(["/stories", "/stories/"], handleStoryUpload);

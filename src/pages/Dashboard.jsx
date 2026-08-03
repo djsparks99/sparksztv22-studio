@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, fileUrl, apiErrorMessage } from "@/lib/api";
+import { api, fileUrl, apiErrorMessage, fileToBase64 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { updateUserProfileInFirestore } from "@/lib/firebase";
 import HlsPlayer from "@/components/HlsPlayer";
@@ -606,7 +606,7 @@ function CredentialRow({ label, value, secret, onCopy, onToggle, reveal, placeho
       <div className="flex items-center gap-2">
         <code
           data-testid={testid}
-          className={`flex-1 overflow-x-auto whitespace-nowrap border border-[#27272a] bg-black px-3 py-2 font-mono text-[11px] ${
+          className={`flex-1 min-w-0 overflow-x-auto whitespace-nowrap border border-[#27272a] bg-black px-3 py-2 font-mono text-[11px] ${
             hasValue
               ? "text-zinc-100 font-bold select-all selection:bg-[#e5ff00] selection:text-black"
               : "text-zinc-500 italic"
@@ -619,7 +619,7 @@ function CredentialRow({ label, value, secret, onCopy, onToggle, reveal, placeho
             type="button"
             data-testid={`${testid}-copy`}
             onClick={() => onCopy(value, label)}
-            className="btn-ghost flex items-center gap-1.5 px-3 py-2 text-xs hover:text-[#e5ff00] hover:border-[#e5ff00]"
+            className="btn-ghost flex-shrink-0 flex items-center gap-1.5 px-3 py-2 text-xs hover:text-[#e5ff00] hover:border-[#e5ff00]"
             aria-label={`Copy ${label}`}
           >
             <Copy className="h-3.5 w-3.5" />
@@ -650,9 +650,13 @@ function ThumbnailUploader({ channel, onChange }) {
     }
     setUploading(true);
     try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const { data } = await api.post("/channels/mine/thumbnail", fd);
+      const base64 = await fileToBase64(file);
+      const { data } = await api.post("/channels/mine/thumbnail", {
+        image: base64,
+        thumbnail: base64,
+        file: base64,
+        filename: file.name
+      });
       onChange?.({ ...channel, thumbnail_url: data.thumbnail_url });
       if (user?.uid) {
         updateUserProfileInFirestore(user.uid, { thumbnail_url: data.thumbnail_url }, channel?.username || user?.username).catch(() => {});

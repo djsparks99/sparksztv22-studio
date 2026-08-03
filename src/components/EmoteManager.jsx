@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { api, fileUrl, apiErrorMessage } from "@/lib/api";
+import { api, fileUrl, apiErrorMessage, fileToBase64 } from "@/lib/api";
 import { Smile, Plus, Trash2, Zap, Upload, Image as ImageIcon } from "lucide-react";
 import { toast } from "sonner";
 
@@ -43,16 +43,18 @@ export default function EmoteManager({ channel }) {
 
     setUploading(true);
     try {
-      const formData = new FormData();
-      formData.append("code", code);
-      formData.append("name", name || code);
+      let payload = { code, name: name || code };
       if (file) {
-        formData.append("file", file);
+        const base64 = await fileToBase64(file);
+        payload.file = base64;
+        payload.image = base64;
+        payload.image_url = base64;
+        payload.filename = file.name;
       } else {
-        formData.append("image_url", imageUrl);
+        payload.image_url = imageUrl;
       }
 
-      await api.post("/channels/mine/emotes", formData);
+      await api.post("/channels/mine/emotes", payload);
 
       toast.success("Emote uploaded successfully!");
       setCode("");

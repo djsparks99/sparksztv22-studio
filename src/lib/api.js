@@ -6,12 +6,49 @@ export const BACKEND = "";
 
 export const api = axios.create({ baseURL: API });
 
-api.interceptors.request.use((config) => {
+export function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    if (!file) return resolve("");
+    if (typeof file === "string") return resolve(file);
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = (error) => reject(error);
+  });
+}
+
+api.interceptors.request.use(async (config) => {
   const token = getToken();
   if (token) {
     config.headers = config.headers || {};
     config.headers.Authorization = `Bearer ${token}`;
   }
+
+  // Convert FormData to Base64 JSON payload to prevent 405 errors from proxies rejecting multipart uploads
+  if (config.data instanceof FormData) {
+    const jsonPayload = {};
+    const entries = Array.from(config.data.entries());
+    for (const [key, value] of entries) {
+      if (value instanceof File || value instanceof Blob) {
+        const base64 = await fileToBase64(value);
+        jsonPayload[key] = base64;
+        jsonPayload["image"] = jsonPayload["image"] || base64;
+        jsonPayload["photo"] = jsonPayload["photo"] || base64;
+        jsonPayload["file"] = jsonPayload["file"] || base64;
+        jsonPayload["media"] = jsonPayload["media"] || base64;
+        jsonPayload["avatar"] = jsonPayload["avatar"] || base64;
+        jsonPayload["thumbnail"] = jsonPayload["thumbnail"] || base64;
+        jsonPayload["filename"] = value.name || "upload.jpg";
+      } else {
+        jsonPayload[key] = value;
+      }
+    }
+    config.data = jsonPayload;
+    if (config.headers) {
+      config.headers["Content-Type"] = "application/json";
+    }
+  }
+
   return config;
 });
 
@@ -77,4 +114,22 @@ export function fileUrl(pathOrUrl) {
   }
   const cleanPath = pathOrUrl.startsWith("/") ? pathOrUrl : `/${pathOrUrl}`;
   return cleanPath;
+}
+
+export async function uploadImage(url, file, extraData = {}) {
+  const base64 = await fileToBase64(file);
+  const payload = {
+    image: base64,
+    photo: base64,
+    file: base64,
+    media: base64,
+    avatar: base64,
+    thumbnail: base64,
+    dataUrl: base64,
+    filename: file?.name || "upload.jpg",
+    ...extraData,
+  };
+  return api.post(url, payload, {
+    headers: { "Content-Type": "application/json" },
+  });
 }

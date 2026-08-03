@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, fileUrl, apiErrorMessage } from "@/lib/api";
+import { api, fileUrl, apiErrorMessage, fileToBase64 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { updateUserProfileInFirestore } from "@/lib/firebase";
 import { toast } from "sonner";
@@ -93,9 +93,13 @@ export default function Profile() {
     }
     setUploading(true);
     try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const { data } = await api.post("/users/me/photo", fd);
+      const base64 = await fileToBase64(file);
+      const { data } = await api.post("/users/me/photo", {
+        image: base64,
+        photo: base64,
+        file: base64,
+        filename: file.name
+      });
       const photoUrl = data?.photo_url || data?.url || data?.avatar_url;
       if (photoUrl) {
         setUser((prev) => ({ ...prev, photo_url: photoUrl }));
