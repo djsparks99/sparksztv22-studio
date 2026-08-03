@@ -2219,13 +2219,111 @@ async function startServer() {
   });
 
   // Get user by username
-  api.get("/users/:username", (req, res) => {
+  api.get("/users/:username", async (req, res) => {
     const uname = req.params.username.toLowerCase();
+    
+    // 1. Check in-memory DB
     for (const u of db.users.values()) {
-      if (u.username === uname) {
+      if (u.username.toLowerCase() === uname) {
         return res.json(userPublic(u));
       }
     }
+
+    // 2. Try Firestore lookup (Admin SDK)
+    if (admin && admin.apps && admin.apps.length) {
+      try {
+        const dbFs = admin.firestore();
+        let docSnap = await dbFs.collection("users").doc(uname).get();
+        
+        if (!docSnap.exists) {
+          const querySnap = await dbFs.collection("users")
+            .where("username", "==", uname)
+            .limit(1)
+            .get();
+          if (!querySnap.empty) {
+            docSnap = querySnap.docs[0];
+          }
+        }
+
+        if (docSnap.exists) {
+          const data = docSnap.data() as any;
+          const u: UserDoc = {
+            uid: data.uid || docSnap.id,
+            email: data.email || "",
+            username: data.username || uname,
+            display_name: data.display_name || data.username || uname,
+            bio: data.bio || "",
+            photo_url: data.photo_url || null,
+            avatar_url: data.avatar_url || data.photo_url || null,
+            is_broadcaster: Boolean(data.is_broadcaster ?? data.isBroadcaster),
+            stream_key: data.stream_key || "",
+            playback_id: data.playback_id || "",
+            watts: typeof data.watts === "number" ? data.watts : 250,
+            twitch_connected: Boolean(data.twitch_connected),
+            youtube_connected: Boolean(data.youtube_connected),
+            kick_connected: Boolean(data.kick_connected),
+            tiktok_connected: Boolean(data.tiktok_connected),
+            twitch_url: data.twitch_url || "",
+            youtube_url: data.youtube_url || "",
+            kick_url: data.kick_url || "",
+            tiktok_url: data.tiktok_url || "",
+            instagram_url: data.instagram_url || "",
+            twitter_url: data.twitter_url || "",
+            location: data.location || "",
+            timezone: data.timezone || "America/New_York",
+            created_at: data.created_at || new Date().toISOString(),
+          };
+          db.users.set(u.uid, u);
+          return res.json(userPublic(u));
+        }
+      } catch (e) {
+        console.error("Firestore user lookup error:", e);
+      }
+    }
+
+    // 3. Try Firestore lookup (REST API fallback)
+    if (firebaseConfig.projectId && firebaseConfig.apiKey) {
+      try {
+        const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
+        const url = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents/users/${uname}?key=${firebaseConfig.apiKey}`;
+        const restRes = await fetch(url);
+        if (restRes.ok) {
+          const doc = await restRes.json();
+          const fields = doc.fields || {};
+          const u: UserDoc = {
+            uid: fields.uid?.stringValue || doc.name.split("/").pop() || "",
+            email: fields.email?.stringValue || "",
+            username: fields.username?.stringValue || uname,
+            display_name: fields.display_name?.stringValue || uname,
+            bio: fields.bio?.stringValue || "",
+            photo_url: fields.photo_url?.stringValue || null,
+            avatar_url: fields.avatar_url?.stringValue || fields.photo_url?.stringValue || null,
+            is_broadcaster: Boolean(fields.is_broadcaster?.booleanValue || fields.isBroadcaster?.booleanValue),
+            stream_key: fields.stream_key?.stringValue || "",
+            playback_id: fields.playback_id?.stringValue || "",
+            watts: typeof fields.watts?.integerValue === "string" ? parseInt(fields.watts.integerValue) : 250,
+            twitch_connected: Boolean(fields.twitch_connected?.booleanValue),
+            youtube_connected: Boolean(fields.youtube_connected?.booleanValue),
+            kick_connected: Boolean(fields.kick_connected?.booleanValue),
+            tiktok_connected: Boolean(fields.tiktok_connected?.booleanValue),
+            twitch_url: fields.twitch_url?.stringValue || "",
+            youtube_url: fields.youtube_url?.stringValue || "",
+            kick_url: fields.kick_url?.stringValue || "",
+            tiktok_url: fields.tiktok_url?.stringValue || "",
+            instagram_url: fields.instagram_url?.stringValue || "",
+            twitter_url: fields.twitter_url?.stringValue || "",
+            location: fields.location?.stringValue || "",
+            timezone: fields.timezone?.stringValue || "America/New_York",
+            created_at: fields.created_at?.stringValue || new Date().toISOString(),
+          };
+          db.users.set(u.uid, u);
+          return res.json(userPublic(u));
+        }
+      } catch (e) {
+        console.error("Firestore REST user lookup error:", e);
+      }
+    }
+
     res.status(404).json({ error: "User not found" });
   });
 
@@ -2463,6 +2561,8 @@ async function startServer() {
     const user = await authenticateToken(req);
 
     let found: ChannelDoc | null = null;
+    
+    // 1. Check in-memory DB
     for (const c of db.channels.values()) {
       if (
         c.username.toLowerCase() === uname ||
@@ -2474,11 +2574,42 @@ async function startServer() {
       }
     }
 
+    // 2. Try Firestore lookup (Admin SDK)
     if (!found && admin && admin.apps && admin.apps.length) {
       try {
         const dbFs = admin.firestore();
-        const docRef = dbFs.collection("channels").doc(uname);
-        const docSnap = await docRef.get();
+        let docSnap = await dbFs.collection("channels").doc(uname).get();
+        
+        if (!docSnap.exists) {
+          const querySnap = await dbFs.collection("channels")
+            .where("username", "==", uname)
+            .limit(1)
+            .get();
+          if (!querySnap.empty) {
+            docSnap = querySnap.docs[0];
+          }
+        }
+
+        if (!docSnap.exists) {
+          const querySnap = await dbFs.collection("channels")
+            .where("channel_id", "==", uname)
+            .limit(1)
+            .get();
+          if (!querySnap.empty) {
+            docSnap = querySnap.docs[0];
+          }
+        }
+
+        if (!docSnap.exists) {
+          const querySnap = await dbFs.collection("channels")
+            .where("user_uid", "==", uname)
+            .limit(1)
+            .get();
+          if (!querySnap.empty) {
+            docSnap = querySnap.docs[0];
+          }
+        }
+
         if (docSnap.exists) {
           const data = docSnap.data() as any;
           found = {
@@ -2503,6 +2634,40 @@ async function startServer() {
         }
       } catch (e) {
         console.error("Firestore channel lookup error:", e);
+      }
+    }
+
+    // 3. Try Firestore lookup (REST API fallback)
+    if (!found && firebaseConfig.projectId && firebaseConfig.apiKey) {
+      try {
+        const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
+        const url = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents/channels/${uname}?key=${firebaseConfig.apiKey}`;
+        const restRes = await fetch(url);
+        if (restRes.ok) {
+          const doc = await restRes.json();
+          const fields = doc.fields || {};
+          found = {
+            channel_id: fields.channel_id?.stringValue || doc.name.split("/").pop() || "",
+            user_uid: fields.user_uid?.stringValue || "",
+            username: fields.username?.stringValue || uname,
+            display_name: fields.display_name?.stringValue || uname,
+            photo_url: fields.photo_url?.stringValue || null,
+            thumbnail_url: fields.thumbnail_url?.stringValue || null,
+            livepeer_stream_id: fields.livepeer_stream_id?.stringValue || "",
+            stream_key: fields.stream_key?.stringValue || "",
+            playback_id: fields.playback_id?.stringValue || "",
+            stream_title: fields.stream_title?.stringValue || "Live Stream",
+            category: fields.category?.stringValue || "music",
+            is_live: Boolean(fields.is_live?.booleanValue),
+            viewer_count: Number(fields.viewer_count?.integerValue || fields.viewer_count?.doubleValue || 0),
+            record_enabled: true,
+            last_updated: fields.last_updated?.stringValue || new Date().toISOString(),
+            created_at: fields.created_at?.stringValue || new Date().toISOString(),
+          };
+          db.channels.set(found.channel_id, found);
+        }
+      } catch (e) {
+        console.error("Firestore REST channel lookup error:", e);
       }
     }
 
@@ -3125,8 +3290,8 @@ async function startServer() {
   api.post(["/livepeer/webhook", "/webhooks/livepeer", "/webhook/livepeer"], handleLivepeerWebhook);
 
   // Serve static uploaded files
-  api.get("/files/*", (req, res) => {
-    const rawPath = req.path.replace(/^\/files\//, "");
+  const handleServeFiles = (req: Request, res: Response) => {
+    const rawPath = req.path.replace(/^\/files\//, "").replace(/^\/api\/files\//, "");
     const fileKey = decodeURIComponent(rawPath);
     const file = getUploadedFile(fileKey) || db.files.get(fileKey) || (req.params[0] ? getUploadedFile(req.params[0]) : null);
     if (!file) {
@@ -3134,7 +3299,11 @@ async function startServer() {
     }
     res.setHeader("Content-Type", file.mimeType);
     res.send(file.data);
-  });
+  };
+
+  app.get("/files/*", handleServeFiles);
+  app.get("/api/files/*", handleServeFiles);
+  api.get("/files/*", handleServeFiles);
 
   // Serve static files from public directory
   app.use(express.static(path.join(process.cwd(), "public")));
@@ -3159,13 +3328,25 @@ async function startServer() {
     "/webhook",
   ], api);
 
-  // Vite Integration
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
+  // Vite Integration and SPA Catch-All
+  const useProductionStatic = process.env.NODE_ENV === "production" || !process.env.APPLET_ID;
+
+  if (!useProductionStatic) {
+    try {
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      });
+      app.use(vite.middlewares);
+      console.log("Vite dev server middleware mounted successfully.");
+    } catch (viteError) {
+      console.warn("Failed to start Vite development server, falling back to static dist files:", viteError);
+      const distPath = path.join(process.cwd(), "dist");
+      app.use(express.static(distPath));
+      app.get("*", (req, res) => {
+        res.sendFile(path.join(distPath, "index.html"));
+      });
+    }
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
