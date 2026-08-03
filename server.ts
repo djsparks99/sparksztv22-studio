@@ -1305,16 +1305,19 @@ const upload = multer({
 
 async function startServer() {
   const app = express();
-  // 1. Ensure express.json() middleware is loaded at the very top before any routes
+  app.use(cors({ origin: "*", methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], allowedHeaders: ["*"] }));
+  app.options("*", cors());
   app.use(express.json({ limit: "50mb", type: ["application/json", "application/*+json", "text/plain"] }));
   app.use(express.urlencoded({ extended: true, limit: "50mb" }));
-  app.use(cors({ origin: "*" }));
 
   const api = express.Router();
 
   // Root
-  api.get("/", (req, res) => {
-    res.json({ service: "pirate-radio-live", status: "ok" });
+  api.get("/", (req, res, next) => {
+    if (req.baseUrl === "/api" || req.originalUrl === "/api" || req.originalUrl === "/api/") {
+      return res.json({ service: "pirate-radio-live", status: "ok" });
+    }
+    next();
   });
 
   // Livepeer Webhook Endpoint
@@ -2001,10 +2004,38 @@ async function startServer() {
     });
   };
 
-  api.post("/users/me/photo", requireAuth, handleUserPhotoUpload);
-  api.post("/users/me/avatar", requireAuth, handleUserPhotoUpload);
-  api.post("/channels/mine/photo", requireAuth, handleUserPhotoUpload);
-  api.post("/channels/mine/avatar", requireAuth, handleUserPhotoUpload);
+  const registerUploadRoute = (paths: string[], handler: any) => {
+    paths.forEach((p) => {
+      const cleanP = p.startsWith("/") ? p : `/${p}`;
+      api.post(cleanP, requireAuth, handler);
+      api.put(cleanP, requireAuth, handler);
+      api.patch(cleanP, requireAuth, handler);
+      app.post(cleanP, requireAuth, handler);
+      app.put(cleanP, requireAuth, handler);
+      app.patch(cleanP, requireAuth, handler);
+      if (!cleanP.startsWith("/api")) {
+        app.post(`/api${cleanP}`, requireAuth, handler);
+        app.put(`/api${cleanP}`, requireAuth, handler);
+        app.patch(`/api${cleanP}`, requireAuth, handler);
+      }
+    });
+  };
+
+  registerUploadRoute(
+    [
+      "/users/me/photo",
+      "/users/me/photo/",
+      "/users/me/avatar",
+      "/users/me/avatar/",
+      "/user/me/photo",
+      "/user/photo",
+      "/channels/mine/photo",
+      "/channels/mine/avatar",
+      "/upload/photo",
+      "/upload/avatar",
+    ],
+    handleUserPhotoUpload
+  );
 
   // Upload channel thumbnail
   const handleThumbnailUpload = (req: Request, res: Response) => {
@@ -2074,7 +2105,16 @@ async function startServer() {
     });
   };
 
-  api.post("/channels/mine/thumbnail", requireAuth, handleThumbnailUpload);
+  registerUploadRoute(
+    [
+      "/channels/mine/thumbnail",
+      "/channels/mine/thumbnail/",
+      "/channel/mine/thumbnail",
+      "/channels/thumbnail",
+      "/upload/thumbnail",
+    ],
+    handleThumbnailUpload
+  );
 
   // Generic Asset Upload Endpoint
   const handleGenericAssetUpload = (req: Request, res: Response) => {
@@ -2129,8 +2169,7 @@ async function startServer() {
     });
   };
 
-  api.post("/assets/upload", requireAuth, handleGenericAssetUpload);
-  api.post("/upload", requireAuth, handleGenericAssetUpload);
+  registerUploadRoute(["/assets/upload", "/assets/upload/", "/upload", "/upload/"], handleGenericAssetUpload);
 
   // Delete channel thumbnail
   api.delete("/channels/mine/thumbnail", requireAuth, async (req, res) => {
@@ -2810,7 +2849,7 @@ async function startServer() {
     res.json(valid);
   });
 
-  api.post("/stories", requireAuth, (req, res) => {
+  const handleStoryUpload = (req: Request, res: Response) => {
     upload.any()(req, res, async (err: any) => {
       if (err) {
         console.error("Multer error during story upload:", err);
@@ -2897,7 +2936,9 @@ async function startServer() {
         return res.status(500).json({ error: uploadErr?.message || "Failed to create story" });
       }
     });
-  });
+  };
+
+  registerUploadRoute(["/stories", "/stories/"], handleStoryUpload);
 
   api.delete("/stories/:id", requireAuth, async (req, res) => {
     const user = (req as any).user as UserDoc;
@@ -3092,6 +3133,24 @@ async function startServer() {
   app.use(express.static(path.join(process.cwd(), "public")));
 
   app.use("/api", api);
+  app.use([
+    "/auth",
+    "/users",
+    "/user",
+    "/channels",
+    "/channel",
+    "/stream",
+    "/streams",
+    "/livepeer",
+    "/stories",
+    "/categories",
+    "/notifications",
+    "/files",
+    "/assets",
+    "/upload",
+    "/webhooks",
+    "/webhook",
+  ], api);
 
   // Vite Integration
   if (process.env.NODE_ENV !== "production") {

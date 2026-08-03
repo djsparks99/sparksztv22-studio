@@ -1,40 +1,8 @@
 import axios from "axios";
 
-function getBackendUrl() {
-  let envVal = "";
-  if (typeof import.meta !== "undefined" && import.meta.env) {
-    envVal =
-      import.meta.env.VITE_BACKEND_URL ||
-      import.meta.env.VITE_API_URL ||
-      import.meta.env.REACT_APP_BACKEND_URL ||
-      import.meta.env.VITE_APP_BACKEND_URL ||
-      "";
-  }
-  if (!envVal && typeof process !== "undefined" && process.env) {
-    envVal =
-      process.env.VITE_BACKEND_URL ||
-      process.env.VITE_API_URL ||
-      process.env.REACT_APP_BACKEND_URL ||
-      process.env.VITE_APP_BACKEND_URL ||
-      "";
-  }
-  if (!envVal && typeof window !== "undefined" && window.__ENV__) {
-    envVal =
-      window.__ENV__.VITE_BACKEND_URL ||
-      window.__ENV__.REACT_APP_BACKEND_URL ||
-      "";
-  }
-  if (!envVal) return "";
-  let clean = String(envVal).trim().replace(/\/+$/, "");
-  if (clean.endsWith("/api")) {
-    clean = clean.slice(0, -4);
-  }
-  return clean;
-}
-
-const BACKEND_URL = getBackendUrl();
-export const API = BACKEND_URL ? `${BACKEND_URL}/api` : "/api";
-export const BACKEND = BACKEND_URL;
+// Unified relative API configuration across all environments (preview & live site)
+export const API = "/api";
+export const BACKEND = "";
 
 export const api = axios.create({ baseURL: API });
 
@@ -108,8 +76,5 @@ export function fileUrl(pathOrUrl) {
     return pathOrUrl;
   }
   const cleanPath = pathOrUrl.startsWith("/") ? pathOrUrl : `/${pathOrUrl}`;
-  if (BACKEND_URL) {
-    return `${BACKEND_URL}${cleanPath}`;
-  }
   return cleanPath;
 }
