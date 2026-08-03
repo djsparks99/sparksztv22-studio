@@ -1,61 +1,81 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
   <defs>
-    <!-- Vinyl Disc Gradient -->
-    <radialGradient id="discGrad" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#1c1c20" />
-      <stop offset="60%" stop-color="#0c0c0e" />
-      <stop offset="100%" stop-color="#050507" />
+    <!-- Premium Neon Yellow Glow Filter -->
+    <filter id="neonGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="14" result="blur" />
+      <feComponentTransfer in="blur" result="glow">
+        <feFuncA type="linear" slope="0.65" />
+      </feComponentTransfer>
+      <feMerge>
+        <feMergeNode in="glow" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+
+    <!-- Subtle gradient for the main bubble fill to look high-definition -->
+    <linearGradient id="bubbleFillGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f2ff44" />
+      <stop offset="100%" stop-color="#d4eb00" />
+    </linearGradient>
+
+    <!-- Soft glow gradient for the eye glints -->
+    <radialGradient id="glintGrad" cx="35%" cy="35%" r="65%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="100%" stop-color="#f0f0f0" />
     </radialGradient>
-
-    <!-- Center Label Neon Yellow Gradient -->
-    <linearGradient id="labelGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#f0ff33" />
-      <stop offset="100%" stop-color="#cbe600" />
-    </linearGradient>
-
-    <!-- Shiny Vinyl Light Reflection -->
-    <linearGradient id="shineGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.18" />
-      <stop offset="35%" stop-color="#ffffff" stop-opacity="0.02" />
-      <stop offset="100%" stop-color="#ffffff" stop-opacity="0" />
-    </linearGradient>
-
-    <linearGradient id="shineGrad2" x1="100%" y1="100%" x2="0%" y2="0%">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.15" />
-      <stop offset="40%" stop-color="#ffffff" stop-opacity="0.02" />
-      <stop offset="100%" stop-color="#ffffff" stop-opacity="0" />
-    </linearGradient>
   </defs>
 
-  <!-- Outer Shadow Disc Base -->
-  <circle cx="256" cy="256" r="248" fill="url(#discGrad)" stroke="#27272a" stroke-width="4" />
+  <!-- BACKGROUND GLOW: Soft neon yellow backdrop bloom -->
+  <path 
+    d="M 155,110 H 357 A 45,45 0 0,1 402,155 V 305 A 45,45 0 0,1 357,350 H 175 C 140,350 100,380 90,410 C 105,380 110,350 110,335 V 155 A 45,45 0 0,1 155,110 Z" 
+    fill="#e5ff00" 
+    stroke="#e5ff00" 
+    stroke-width="36" 
+    stroke-linejoin="round" 
+    filter="url(#neonGlow)" 
+    opacity="0.45" 
+  />
 
-  <!-- Concentric Sound Grooves -->
-  <circle cx="256" cy="256" r="230" fill="none" stroke="#222227" stroke-width="2.5" opacity="0.8" />
-  <circle cx="256" cy="256" r="212" fill="none" stroke="#18181c" stroke-width="3" opacity="0.9" />
-  <circle cx="256" cy="256" r="194" fill="none" stroke="#2a2a30" stroke-width="2" opacity="0.7" />
-  <circle cx="256" cy="256" r="176" fill="none" stroke="#1f1f24" stroke-width="2.5" opacity="0.8" />
-  <circle cx="256" cy="256" r="158" fill="none" stroke="#2c2c34" stroke-width="1.8" opacity="0.6" />
-  <circle cx="256" cy="256" r="140" fill="none" stroke="#1a1a1e" stroke-width="3" opacity="0.9" />
-  <circle cx="256" cy="256" r="122" fill="none" stroke="#24242a" stroke-width="2" opacity="0.7" />
+  <!-- LAYER 1: Thick Outer Crisp White Border -->
+  <path 
+    d="M 155,110 H 357 A 45,45 0 0,1 402,155 V 305 A 45,45 0 0,1 357,350 H 175 C 140,350 100,380 90,410 C 105,380 110,350 110,335 V 155 A 45,45 0 0,1 155,110 Z" 
+    fill="#ffffff" 
+    stroke="#ffffff" 
+    stroke-width="26" 
+    stroke-linejoin="round" 
+  />
 
-  <!-- Sheen Reflection Wedges -->
-  <path d="M 256 256 L 60 60 A 248 248 0 0 1 452 60 Z" fill="url(#shineGrad1)" />
-  <path d="M 256 256 L 452 452 A 248 248 0 0 1 60 452 Z" fill="url(#shineGrad2)" />
+  <!-- LAYER 2: Sleek Dark Outline (Creates the high-contrast separation) -->
+  <path 
+    d="M 155,110 H 357 A 45,45 0 0,1 402,155 V 305 A 45,45 0 0,1 357,350 H 175 C 140,350 100,380 90,410 C 105,380 110,350 110,335 V 155 A 45,45 0 0,1 155,110 Z" 
+    fill="#121214" 
+    stroke="#121214" 
+    stroke-width="12" 
+    stroke-linejoin="round" 
+  />
 
-  <!-- Center Label Outer Ring -->
-  <circle cx="256" cy="256" r="92" fill="#000000" stroke="#e5ff00" stroke-width="3" />
+  <!-- LAYER 3: Main Solid Neon Yellow/Green Chat Bubble Fill -->
+  <path 
+    d="M 155,110 H 357 A 45,45 0 0,1 402,155 V 305 A 45,45 0 0,1 357,350 H 175 C 140,350 100,380 90,410 C 105,380 110,350 110,335 V 155 A 45,45 0 0,1 155,110 Z" 
+    fill="url(#bubbleFillGrad)" 
+  />
 
-  <!-- Center Record Label -->
-  <circle cx="256" cy="256" r="84" fill="url(#labelGrad)" />
+  <!-- MASCOT EYES -->
+  <g>
+    <!-- LEFT EYE -->
+    <!-- Base black iris -->
+    <circle cx="205" cy="225" r="32" fill="#000000" />
+    <!-- Primary white glint -->
+    <circle cx="215" cy="215" r="10" fill="url(#glintGrad)" />
+    <!-- Secondary soft glint -->
+    <circle cx="195" cy="237" r="5" fill="#ffffff" opacity="0.9" />
 
-  <!-- Center Label Inner Branding Ring & Design -->
-  <circle cx="256" cy="256" r="72" fill="none" stroke="#111111" stroke-width="1.5" stroke-dasharray="4 3" opacity="0.6" />
-
-  <!-- Lightning Bolt Icon in Center Label -->
-  <path d="M 262 206 L 238 250 L 254 250 L 244 294 L 278 246 L 258 246 Z" fill="#050505" />
-
-  <!-- Center Spindle Hole Rim -->
-  <circle cx="256" cy="256" r="22" fill="#050505" stroke="#111111" stroke-width="2" />
-  <circle cx="256" cy="256" r="16" fill="#0d0d0f" />
+    <!-- RIGHT EYE -->
+    <!-- Base black iris -->
+    <circle cx="307" cy="225" r="32" fill="#000000" />
+    <!-- Primary white glint -->
+    <circle cx="317" cy="215" r="10" fill="url(#glintGrad)" />
+    <!-- Secondary soft glint -->
+    <circle cx="297" cy="237" r="5" fill="#ffffff" opacity="0.9" />
+  </g>
 </svg>

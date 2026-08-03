@@ -13,6 +13,7 @@ import Register from "@/pages/Register";
 import Channel from "@/pages/Channel";
 import Dashboard from "@/pages/Dashboard";
 import Profile from "@/pages/Profile";
+import Lounge from "@/pages/Lounge";
 import ObsOverlay from "@/pages/ObsOverlay";
 import { useLivepeerAutoPoll } from "@/hooks/useLivepeerAutoPoll";
 
@@ -104,6 +105,7 @@ export default function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
             <Route path="/channel/:username" element={<Channel />} />
+            <Route path="/lounge" element={<Lounge />} />
             <Route element={<ProtectedLayout />}>
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/profile" element={<Profile />} />

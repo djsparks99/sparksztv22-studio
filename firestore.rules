@@ -48,5 +48,26 @@ service cloud.firestore {
       allow create: if request.auth != null;
       allow delete: if false;
     }
+
+    // Lounge chat messages
+    match /lounge_messages/{messageId} {
+      allow read: if true;
+      allow create: if request.auth != null;
+      allow delete: if request.auth != null && request.auth.token.email == "markysparks99@gmail.com";
+    }
+
+    // Lounge music mixes
+    match /lounge_mixes/{mixId} {
+      allow read: if true;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null && request.auth.uid == resource.data.uid;
+      allow delete: if request.auth != null && (request.auth.uid == resource.data.uid || request.auth.token.email == "markysparks99@gmail.com");
+    }
+
+    // Lounge host/admin featured tracks
+    match /lounge_featured/{trackId} {
+      allow read: if true;
+      allow create, update, delete: if request.auth != null && request.auth.token.email == "markysparks99@gmail.com";
+    }
   }
 }

@@ -78,6 +78,66 @@
         "sender_display_name": { "type": "string", "required": true },
         "created_at": { "type": "string", "required": true }
       }
+    },
+    "lounge_messages": {
+      "path": "lounge_messages/{messageId}",
+      "description": "Real-time chat messages inside The Lounge hangout room",
+      "allow": {
+        "read": "true",
+        "create": "request.auth != null",
+        "update": "false",
+        "delete": "request.auth != null && request.auth.token.email == 'markysparks99@gmail.com'"
+      },
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "text": { "type": "string", "required": true },
+        "sender_uid": { "type": "string", "required": true },
+        "sender_username": { "type": "string", "required": true },
+        "sender_display_name": { "type": "string", "required": true },
+        "sender_photo_url": { "type": "string", "required": false },
+        "created_at": { "type": "string", "required": true }
+      }
+    },
+    "lounge_mixes": {
+      "path": "lounge_mixes/{mixId}",
+      "description": "Music mixes and track links posted by Lounge members",
+      "allow": {
+        "read": "true",
+        "create": "request.auth != null",
+        "update": "request.auth != null && request.auth.uid == resource.data.uid",
+        "delete": "request.auth != null && (request.auth.uid == resource.data.uid || request.auth.token.email == 'markysparks99@gmail.com')"
+      },
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "uid": { "type": "string", "required": true },
+        "username": { "type": "string", "required": true },
+        "display_name": { "type": "string", "required": true },
+        "photo_url": { "type": "string", "required": false },
+        "title": { "type": "string", "required": true },
+        "url": { "type": "string", "required": true },
+        "type": { "type": "string", "required": true },
+        "description": { "type": "string", "required": false },
+        "created_at": { "type": "string", "required": true }
+      }
+    },
+    "lounge_featured": {
+      "path": "lounge_featured/{trackId}",
+      "description": "Featured tracks pinned to the Lounge by the host/admin",
+      "allow": {
+        "read": "true",
+        "create": "request.auth != null && request.auth.token.email == 'markysparks99@gmail.com'",
+        "update": "request.auth != null && request.auth.token.email == 'markysparks99@gmail.com'",
+        "delete": "request.auth != null && request.auth.token.email == 'markysparks99@gmail.com'"
+      },
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "title": { "type": "string", "required": true },
+        "url": { "type": "string", "required": true },
+        "type": { "type": "string", "required": true },
+        "description": { "type": "string", "required": false },
+        "pinned": { "type": "boolean", "required": true },
+        "created_at": { "type": "string", "required": true }
+      }
     }
   }
 }

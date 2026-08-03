@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://sparkz.tv/sitemap.xml
+Sitemap: https://sparkztv.live/sitemap.xml

@@ -118,6 +118,9 @@ export default function Navbar() {
             <NavItem to="/directory" testid="nav-directory">
               DIRECTORY
             </NavItem>
+            <NavItem to="/lounge" testid="nav-lounge">
+              THE LOUNGE
+            </NavItem>
             {user && (
               <NavItem to="/dashboard" testid="nav-dashboard">
                 STUDIO

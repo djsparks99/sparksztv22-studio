@@ -2,15 +2,15 @@
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
     <title>Sparkz.TV — Underground Live Broadcasts</title>
-    <link>https://sparkz.tv/</link>
+    <link>https://sparkztv.live/</link>
     <description>Live underground DJ sets, radio broadcasts, jungle, techno, and dub streams on Sparkz.TV.</description>
     <language>en-us</language>
-    <atom:link href="https://sparkz.tv/feed.xml" rel="self" type="application/rss+xml" />
+    <atom:link href="https://sparkztv.live/feed.xml" rel="self" type="application/rss+xml" />
     <item>
       <title>Sparkz.TV Underground Network Live Streams</title>
-      <link>https://sparkz.tv/directory</link>
+      <link>https://sparkztv.live/directory</link>
       <description>Tune in to live broadcasts from independent DJs and underground pirate stations across the globe.</description>
-      <guid>https://sparkz.tv/directory</guid>
+      <guid>https://sparkztv.live/directory</guid>
     </item>
   </channel>
 </rss>
