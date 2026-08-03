@@ -6,8 +6,19 @@ const rawApiUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_BACKEND_U
 // Ensure API base URL is always absolute-to-root (starts with '/') or a fully-qualified URL
 let resolvedApi = "/api";
 if (typeof window !== "undefined" && window.location && window.location.origin) {
-  // Prefer the current window origin in the browser to avoid stale hardcoded or environment-configured backend URLs (like Vercel)
-  resolvedApi = `${window.location.origin}/api`;
+  const hostname = window.location.hostname;
+  // If running in the AI Studio preview environment or localhost, always query the local container's backend
+  if (hostname.endsWith(".run.app") || hostname === "localhost" || hostname === "127.0.0.1") {
+    resolvedApi = `${window.location.origin}/api`;
+  } else if (rawApiUrl) {
+    if (/^https?:\/\//i.test(rawApiUrl)) {
+      resolvedApi = rawApiUrl;
+    } else {
+      resolvedApi = rawApiUrl.startsWith("/") ? rawApiUrl : `/${rawApiUrl}`;
+    }
+  } else {
+    resolvedApi = `${window.location.origin}/api`;
+  }
 } else if (rawApiUrl) {
   if (/^https?:\/\//i.test(rawApiUrl)) {
     resolvedApi = rawApiUrl;

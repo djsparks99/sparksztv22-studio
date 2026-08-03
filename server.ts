@@ -511,7 +511,7 @@ async function queryAndUpdateFirestoreChannels(searchKeys: string[], isLive: boo
   console.log(`[REST Fallback Finished] Total channels updated: ${updatedCount}, is_live=${isLive}`);
 }
 
-const PORT = 3000;
+const PORT = process.env.APPLET_ID ? 3000 : (process.env.PORT ? parseInt(process.env.PORT, 10) : 3000);
 const JWT_SECRET = process.env.JWT_SECRET || "sparkz_secret_key_12345";
 const APP_NAME = "pirateradio";
 const CATEGORIES = [
