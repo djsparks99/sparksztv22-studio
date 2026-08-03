@@ -29,52 +29,76 @@ export default function Dashboard() {
   const [channel, setChannel] = useState(null);
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState("music");
-  const [reveal, setReveal] = useState(false);
+  const [reveal, setReveal] = useState(true);
   const [creatingStream, setCreatingStream] = useState(false);
   const [autoDetect, setAutoDetect] = useState(true);
 
   useLivepeerAutoPoll(channel?.username);
 
+  const localKeyName = user?.uid ? `sparkz_stream_key_${user.uid}` : "sparkz_stream_key";
+  const localPlaybackName = user?.uid ? `sparkz_playback_id_${user.uid}` : "sparkz_playback_id";
+
   const load = async () => {
     try {
       const { data } = await api.get("/channels/mine");
       if (data) {
+        const storedKey = localStorage.getItem(localKeyName) || "";
+        const storedPlayback = localStorage.getItem(localPlaybackName) || "";
+
+        const finalKey = data.stream_key || storedKey || "";
+        const finalPlayback = data.playback_id || storedPlayback || "";
+
+        if (finalKey) localStorage.setItem(localKeyName, finalKey);
+        if (finalPlayback) localStorage.setItem(localPlaybackName, finalPlayback);
+
         setChannel((prev) => ({
           ...(prev || {}),
           ...data,
-          stream_key: data.stream_key || prev?.stream_key || "",
-          playback_id: data.playback_id || prev?.playback_id || "",
+          stream_key: finalKey || prev?.stream_key || "",
+          playback_id: finalPlayback || prev?.playback_id || "",
           livepeer_stream_id: data.livepeer_stream_id || prev?.livepeer_stream_id || "",
           rtmp_url: data.rtmp_url || prev?.rtmp_url || "rtmp://rtmp.livepeer.com/live",
           playback_url:
             data.playback_url ||
             prev?.playback_url ||
-            (data.playback_id || prev?.playback_id
-              ? `https://livepeercdn.studio/hls/${data.playback_id || prev?.playback_id}/index.m3u8`
+            (finalPlayback
+              ? `https://livepeercdn.studio/hls/${finalPlayback}/index.m3u8`
               : ""),
         }));
         setTitle(data.stream_title || "");
         setCategory(data.category || "music");
 
         // Automatically fetch/ensure permanent stream key if missing
-        if (!data.stream_key || !data.playback_id) {
+        if (!finalKey || !finalPlayback) {
           const res = await api.post("/stream/create", { forceNew: false });
           if (res.data && res.data.channel) {
+            const k = res.data.channel.stream_key || "";
+            const p = res.data.channel.playback_id || "";
+            if (k) localStorage.setItem(localKeyName, k);
+            if (p) localStorage.setItem(localPlaybackName, p);
+
             setChannel((prev) => ({
               ...(prev || {}),
               ...res.data.channel,
+              stream_key: k || prev?.stream_key || "",
+              playback_id: p || prev?.playback_id || "",
               rtmp_url: res.data.channel.rtmp_url || prev?.rtmp_url || "rtmp://rtmp.livepeer.com/live",
             }));
           } else if (res.data && res.data.stream_key) {
+            const k = res.data.stream_key;
+            const p = res.data.playback_id;
+            if (k) localStorage.setItem(localKeyName, k);
+            if (p) localStorage.setItem(localPlaybackName, p);
+
             setChannel((prev) => ({
               ...(prev || {}),
-              stream_key: res.data.stream_key,
-              playback_id: res.data.playback_id,
+              stream_key: k,
+              playback_id: p,
               livepeer_stream_id: res.data.livepeer_stream_id,
               rtmp_url: res.data.rtmp_url || prev?.rtmp_url || "rtmp://rtmp.livepeer.com/live",
               playback_url:
                 res.data.playback_url ||
-                `https://livepeercdn.studio/hls/${res.data.playback_id}/index.m3u8`,
+                `https://livepeercdn.studio/hls/${p}/index.m3u8`,
             }));
           }
         }
@@ -179,6 +203,9 @@ export default function Dashboard() {
           data.playback_url ||
           data.channel?.playback_url ||
           `https://livepeercdn.studio/hls/${newPlaybackId}/index.m3u8`;
+
+        if (newKey) localStorage.setItem(localKeyName, newKey);
+        if (newPlaybackId) localStorage.setItem(localPlaybackName, newPlaybackId);
 
         setChannel((prev) => ({
           ...(prev || {}),

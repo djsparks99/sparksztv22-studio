@@ -876,37 +876,160 @@ async function authenticateToken(req: Request): Promise<UserDoc | null> {
 
   let hasChannel = false;
   for (const c of db.channels.values()) {
-    if (c.user_uid === user.uid) {
+    if (c.user_uid === user.uid || (c.username && c.username.toLowerCase() === user.username.toLowerCase())) {
       hasChannel = true;
       break;
     }
   }
 
   if (!hasChannel) {
-    const livepeerStream = await createLivepeerStream(user.username);
-    const channelDoc: ChannelDoc = {
-      channel_id: crypto.randomUUID(),
-      user_uid: user.uid,
-      username: user.username,
-      display_name: user.display_name,
-      photo_url: user.photo_url,
-      thumbnail_url: null,
-      livepeer_stream_id: livepeerStream.id,
-      stream_key: livepeerStream.streamKey,
-      playback_id: livepeerStream.playbackId,
-      stream_title: `${user.display_name}'s Live Stream`,
-      category: "music",
-      is_live: false,
-      viewer_count: 0,
-      record_enabled: true,
-      last_updated: new Date().toISOString(),
-      created_at: new Date().toISOString(),
-    };
-    db.channels.set(channelDoc.channel_id, channelDoc);
-    await syncChannelToFirestore(channelDoc);
+    await getOrRestoreUserChannel(user);
   }
 
   return user;
+}
+
+async function getOrRestoreUserChannel(user: UserDoc): Promise<ChannelDoc> {
+  // 1. Check in-memory channels map
+  for (const c of db.channels.values()) {
+    if (
+      (c.user_uid && c.user_uid === user.uid) ||
+      (c.username && c.username.toLowerCase() === user.username.toLowerCase())
+    ) {
+      c.user_uid = user.uid;
+      c.username = user.username;
+      c.display_name = user.display_name || c.display_name || user.username;
+      return c;
+    }
+  }
+
+  // 2. Query Firestore via Firebase Admin SDK if available
+  if (admin && admin.apps && admin.apps.length) {
+    try {
+      const dbFs = admin.firestore();
+      const docsToTry = [
+        dbFs.collection("channels").doc(user.username.toLowerCase()),
+        dbFs.collection("channels").doc(user.uid),
+        dbFs.collection("users").doc(user.uid),
+      ];
+
+      for (const docRef of docsToTry) {
+        const snap = await docRef.get().catch(() => null);
+        if (snap && snap.exists) {
+          const data = snap.data() as any;
+          if (data && (data.stream_key || data.streamKey || data.playback_id || data.playbackId)) {
+            const channelDoc: ChannelDoc = {
+              channel_id: data.channel_id || data.channelId || user.uid,
+              user_uid: user.uid,
+              username: user.username,
+              display_name: user.display_name || data.display_name || user.username,
+              photo_url: user.photo_url || data.photo_url || null,
+              thumbnail_url: data.thumbnail_url || null,
+              livepeer_stream_id: data.livepeer_stream_id || data.stream_id || "",
+              stream_key: data.stream_key || data.streamKey || "",
+              playback_id: data.playback_id || data.playbackId || "",
+              stream_title: data.stream_title || `${user.display_name}'s Live Stream`,
+              category: data.category || "music",
+              is_live: Boolean(data.is_live || data.isLive),
+              viewer_count: Number(data.viewer_count || 0),
+              record_enabled: true,
+              last_updated: data.last_updated || new Date().toISOString(),
+              created_at: data.created_at || new Date().toISOString(),
+            };
+            db.channels.set(channelDoc.channel_id, channelDoc);
+            return channelDoc;
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Firestore Admin SDK channel restore error:", e);
+    }
+  }
+
+  // 3. Query Firestore via REST API Fallback
+  if (firebaseConfig.projectId && firebaseConfig.apiKey) {
+    try {
+      const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
+      const urls = [
+        `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents/channels/${user.username.toLowerCase()}?key=${firebaseConfig.apiKey}`,
+        `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents/channels/${user.uid}?key=${firebaseConfig.apiKey}`,
+        `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents/users/${user.uid}?key=${firebaseConfig.apiKey}`,
+      ];
+
+      for (const url of urls) {
+        const res = await fetch(url).catch(() => null);
+        if (res && res.ok) {
+          const docData = await res.json();
+          const fields = docData.fields || {};
+          const streamKey = fields.stream_key?.stringValue || fields.streamKey?.stringValue || "";
+          const playbackId = fields.playback_id?.stringValue || fields.playbackId?.stringValue || "";
+          const livepeerStreamId = fields.livepeer_stream_id?.stringValue || fields.stream_id?.stringValue || "";
+
+          if (streamKey || playbackId) {
+            const channelDoc: ChannelDoc = {
+              channel_id: fields.channel_id?.stringValue || user.uid,
+              user_uid: user.uid,
+              username: user.username,
+              display_name: user.display_name || fields.display_name?.stringValue || user.username,
+              photo_url: user.photo_url || fields.photo_url?.stringValue || null,
+              thumbnail_url: fields.thumbnail_url?.stringValue || null,
+              livepeer_stream_id: livepeerStreamId,
+              stream_key: streamKey,
+              playback_id: playbackId,
+              stream_title: fields.stream_title?.stringValue || `${user.display_name}'s Live Stream`,
+              category: fields.category?.stringValue || "music",
+              is_live: Boolean(fields.is_live?.booleanValue),
+              viewer_count: Number(fields.viewer_count?.integerValue || 0),
+              record_enabled: true,
+              last_updated: fields.last_updated?.stringValue || new Date().toISOString(),
+              created_at: fields.created_at?.stringValue || new Date().toISOString(),
+            };
+            db.channels.set(channelDoc.channel_id, channelDoc);
+            return channelDoc;
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Firestore REST channel restore error:", e);
+    }
+  }
+
+  // 4. Create new Livepeer stream ONLY if no channel exists in memory or Firestore
+  let livepeerStreamId = "";
+  let streamKey = "";
+  let playbackId = "";
+
+  try {
+    const livepeerStream = await createLivepeerStream(user.username);
+    livepeerStreamId = livepeerStream.id;
+    streamKey = livepeerStream.streamKey;
+    playbackId = livepeerStream.playbackId;
+  } catch (e) {
+    console.error("Livepeer stream creation failed during new channel initialization:", e);
+  }
+
+  const newChannel: ChannelDoc = {
+    channel_id: user.uid || crypto.randomUUID(),
+    user_uid: user.uid,
+    username: user.username,
+    display_name: user.display_name,
+    photo_url: user.photo_url || null,
+    thumbnail_url: null,
+    livepeer_stream_id: livepeerStreamId,
+    stream_key: streamKey,
+    playback_id: playbackId,
+    stream_title: `${user.display_name}'s Live Stream`,
+    category: "music",
+    is_live: false,
+    viewer_count: 0,
+    record_enabled: true,
+    last_updated: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+  };
+
+  db.channels.set(newChannel.channel_id, newChannel);
+  syncChannelToFirestore(newChannel).catch(() => {});
+  return newChannel;
 }
 
 async function requireAuth(req: Request, res: Response, next: NextFunction) {
@@ -1405,19 +1528,12 @@ async function startServer() {
   api.post(["/stream/create", "/streams/create", "/channels/mine/stream"], requireAuth, async (req, res) => {
     try {
       const user = (req as any).user as UserDoc;
-      let targetChannel: ChannelDoc | null = null;
-
-      for (const c of db.channels.values()) {
-        if (c.user_uid === user.uid) {
-          targetChannel = c;
-          break;
-        }
-      }
-
       const forceNew = Boolean(req.body?.forceNew || req.body?.force_new);
 
+      const targetChannel = await getOrRestoreUserChannel(user);
+
       // Reuse existing persistent stream key if available and new key was not explicitly forced
-      if (targetChannel && targetChannel.stream_key && targetChannel.playback_id && !forceNew) {
+      if (targetChannel.stream_key && targetChannel.playback_id && !forceNew) {
         return res.json({
           success: true,
           channel_id: targetChannel.channel_id,
@@ -1430,35 +1546,14 @@ async function startServer() {
         });
       }
 
-      // Call Livepeer API to generate new stream credentials
+      // Explicitly generate a NEW stream key only if forceNew is true or if stream_key is missing
       const livepeerStream = await createLivepeerStream(user.username);
+      targetChannel.livepeer_stream_id = livepeerStream.id;
+      targetChannel.stream_key = livepeerStream.streamKey;
+      targetChannel.playback_id = livepeerStream.playbackId;
+      targetChannel.last_updated = nowIso();
 
-      if (targetChannel) {
-        targetChannel.livepeer_stream_id = livepeerStream.id;
-        targetChannel.stream_key = livepeerStream.streamKey;
-        targetChannel.playback_id = livepeerStream.playbackId;
-        targetChannel.last_updated = nowIso();
-      } else {
-        targetChannel = {
-          channel_id: crypto.randomUUID(),
-          user_uid: user.uid,
-          username: user.username,
-          display_name: user.display_name,
-          photo_url: user.photo_url,
-          thumbnail_url: null,
-          livepeer_stream_id: livepeerStream.id,
-          stream_key: livepeerStream.streamKey,
-          playback_id: livepeerStream.playbackId,
-          stream_title: `${user.display_name}'s Live Stream`,
-          category: "music",
-          is_live: false,
-          viewer_count: 0,
-          record_enabled: true,
-          last_updated: nowIso(),
-          created_at: nowIso(),
-        };
-        db.channels.set(targetChannel.channel_id, targetChannel);
-      }
+      syncChannelToFirestore(targetChannel).catch(() => {});
 
       // Direct sync into user's and channel's Firestore document (graceful non-blocking)
       syncChannelToFirestore(targetChannel).catch((err) => {
@@ -1626,50 +1721,7 @@ async function startServer() {
   api.get("/channels/mine", requireAuth, async (req, res) => {
     try {
       const user = (req as any).user as UserDoc;
-      let myChannel: ChannelDoc | null = null;
-
-      for (const c of db.channels.values()) {
-        if (c.user_uid === user.uid) {
-          myChannel = c;
-          break;
-        }
-      }
-
-      // Auto-create channel if missing for authenticated user
-      if (!myChannel) {
-        const lp = await createLivepeerStream(user.username);
-        myChannel = {
-          channel_id: crypto.randomUUID(),
-          user_uid: user.uid,
-          username: user.username,
-          display_name: user.display_name,
-          photo_url: user.photo_url || null,
-          thumbnail_url: null,
-          livepeer_stream_id: lp.id,
-          stream_key: lp.streamKey,
-          playback_id: lp.playbackId,
-          stream_title: `${user.display_name}'s Live Stream`,
-          category: "music",
-          is_live: false,
-          viewer_count: 0,
-          record_enabled: true,
-          last_updated: nowIso(),
-          created_at: nowIso(),
-        };
-        db.channels.set(myChannel.channel_id, myChannel);
-        syncChannelToFirestore(myChannel).catch(() => {});
-      } else if (!myChannel.stream_key || !myChannel.playback_id) {
-        try {
-          const lp = await createLivepeerStream(myChannel.username);
-          myChannel.livepeer_stream_id = lp.id;
-          myChannel.stream_key = lp.streamKey;
-          myChannel.playback_id = lp.playbackId;
-          myChannel.last_updated = nowIso();
-          syncChannelToFirestore(myChannel).catch(() => {});
-        } catch (e) {
-          console.error("Auto stream creation on channel fetch failed:", e);
-        }
-      }
+      const myChannel = await getOrRestoreUserChannel(user);
 
       const followers = getFollowerCount(myChannel.username);
       const subscribers = getSubscriberCount(myChannel.username);
@@ -1690,7 +1742,7 @@ async function startServer() {
   });
 
   // Update my channel
-  api.patch("/channels/mine", requireAuth, (req, res) => {
+  api.patch("/channels/mine", requireAuth, async (req, res) => {
     try {
       const user = (req as any).user as UserDoc;
       const { stream_title, category, schedule, stream_key, playback_id, livepeer_stream_id } = req.body || {};
@@ -1699,51 +1751,23 @@ async function startServer() {
         return res.status(400).json({ error: "Invalid category" });
       }
 
-      let myChannel: ChannelDoc | null = null;
-      for (const c of db.channels.values()) {
-        if (c.user_uid === user.uid) {
-          myChannel = c;
-          break;
-        }
-      }
+      const myChannel = await getOrRestoreUserChannel(user);
 
-      if (!myChannel) {
-        myChannel = {
-          channel_id: crypto.randomUUID(),
-          user_uid: user.uid,
-          username: user.username,
-          display_name: user.display_name,
-          photo_url: user.photo_url || null,
-          thumbnail_url: null,
-          livepeer_stream_id: livepeer_stream_id ? String(livepeer_stream_id) : "",
-          stream_key: stream_key ? String(stream_key) : "",
-          playback_id: playback_id ? String(playback_id) : "",
-          stream_title: stream_title ? String(stream_title) : `${user.display_name}'s Live Stream`,
-          category: category ? String(category) : "music",
-          is_live: false,
-          viewer_count: 0,
-          record_enabled: true,
-          last_updated: nowIso(),
-          created_at: nowIso(),
-        };
-        db.channels.set(myChannel.channel_id, myChannel);
-      } else {
-        if (stream_title !== undefined) myChannel.stream_title = String(stream_title);
-        if (category !== undefined) myChannel.category = String(category);
-        if (stream_key !== undefined) myChannel.stream_key = String(stream_key);
-        if (playback_id !== undefined) myChannel.playback_id = String(playback_id);
-        if (livepeer_stream_id !== undefined) myChannel.livepeer_stream_id = String(livepeer_stream_id);
-        if (Array.isArray(schedule)) {
-          myChannel.schedule = schedule.map((item: any) => ({
-            id: String(item.id || crypto.randomUUID()),
-            day: String(item.day || "FRI"),
-            time: String(item.time || "20:00 - 22:00"),
-            title: String(item.title || "Live Set"),
-            genre: item.genre ? String(item.genre) : undefined,
-          }));
-        }
-        myChannel.last_updated = nowIso();
+      if (stream_title !== undefined) myChannel.stream_title = String(stream_title);
+      if (category !== undefined) myChannel.category = String(category);
+      if (stream_key !== undefined && String(stream_key).trim()) myChannel.stream_key = String(stream_key);
+      if (playback_id !== undefined && String(playback_id).trim()) myChannel.playback_id = String(playback_id);
+      if (livepeer_stream_id !== undefined && String(livepeer_stream_id).trim()) myChannel.livepeer_stream_id = String(livepeer_stream_id);
+      if (Array.isArray(schedule)) {
+        myChannel.schedule = schedule.map((item: any) => ({
+          id: String(item.id || crypto.randomUUID()),
+          day: String(item.day || "FRI"),
+          time: String(item.time || "20:00 - 22:00"),
+          title: String(item.title || "Live Set"),
+          genre: item.genre ? String(item.genre) : undefined,
+        }));
       }
+      myChannel.last_updated = nowIso();
 
       syncChannelToFirestore(myChannel).catch(() => {});
       return res.json(channelPublic(myChannel, { include_stream_key: true }));
