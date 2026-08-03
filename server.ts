@@ -16,6 +16,9 @@ const admin: any = (firebaseAdmin as any).default || firebaseAdmin;
 
 dotenv.config();
 
+// Triggering fresh GitHub sync & Render build deployment with updated configuration parameters.
+console.log("SPARKZ.TV - Server booting up with latest deployment environment parameters.");
+
 let firebaseConfig: any = {};
 try {
   const configPath = path.join(process.cwd(), "firebase-applet-config.json");
