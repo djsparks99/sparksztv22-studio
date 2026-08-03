@@ -1942,11 +1942,7 @@ async function startServer() {
 
   // Upload user photo / avatar
   const handleUserPhotoUpload = (req: Request, res: Response) => {
-    upload.any()(req, res, async (err: any) => {
-      if (err) {
-        console.error("Multer error during photo upload:", err);
-        return res.status(400).json({ error: err.message || "Failed to upload photo" });
-      }
+    const processUpload = async () => {
       try {
         const user = (req as any).user as UserDoc;
         let photoUrl = req.body?.photo_url || req.body?.imageUrl || req.body?.avatar_url || req.body?.url || "";
@@ -2001,22 +1997,34 @@ async function startServer() {
         console.error("Error uploading user photo:", uploadErr);
         return res.status(500).json({ error: uploadErr?.message || "Upload photo failed" });
       }
-    });
+    };
+
+    if ((req as any).files || req.file) {
+      processUpload();
+    } else {
+      upload.any()(req, res, (err: any) => {
+        if (err) {
+          console.error("Multer error during photo upload:", err);
+          return res.status(400).json({ error: err.message || "Failed to upload photo" });
+        }
+        processUpload();
+      });
+    }
   };
 
   const registerUploadRoute = (paths: string[], handler: any) => {
     paths.forEach((p) => {
       const cleanP = p.startsWith("/") ? p : `/${p}`;
-      api.post(cleanP, requireAuth, handler);
-      api.put(cleanP, requireAuth, handler);
-      api.patch(cleanP, requireAuth, handler);
-      app.post(cleanP, requireAuth, handler);
-      app.put(cleanP, requireAuth, handler);
-      app.patch(cleanP, requireAuth, handler);
+      api.post(cleanP, upload.any(), requireAuth, handler);
+      api.put(cleanP, upload.any(), requireAuth, handler);
+      api.patch(cleanP, upload.any(), requireAuth, handler);
+      app.post(cleanP, upload.any(), requireAuth, handler);
+      app.put(cleanP, upload.any(), requireAuth, handler);
+      app.patch(cleanP, upload.any(), requireAuth, handler);
       if (!cleanP.startsWith("/api")) {
-        app.post(`/api${cleanP}`, requireAuth, handler);
-        app.put(`/api${cleanP}`, requireAuth, handler);
-        app.patch(`/api${cleanP}`, requireAuth, handler);
+        app.post(`/api${cleanP}`, upload.any(), requireAuth, handler);
+        app.put(`/api${cleanP}`, upload.any(), requireAuth, handler);
+        app.patch(`/api${cleanP}`, upload.any(), requireAuth, handler);
       }
     });
   };
@@ -2027,12 +2035,19 @@ async function startServer() {
       "/users/me/photo/",
       "/users/me/avatar",
       "/users/me/avatar/",
+      "/users/me/profile",
       "/user/me/photo",
+      "/user/me/avatar",
       "/user/photo",
       "/channels/mine/photo",
       "/channels/mine/avatar",
       "/upload/photo",
       "/upload/avatar",
+      "/upload/profile",
+      "/upload/image",
+      "/upload/file",
+      "/upload",
+      "/upload/",
     ],
     handleUserPhotoUpload
   );
