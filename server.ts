@@ -441,6 +441,60 @@ async function restoreChannelsFromFirestore() {
   }
 }
 
+async function restoreEmotesFromFirestore() {
+  if (admin && admin.apps && admin.apps.length) {
+    try {
+      const dbFs = admin.firestore();
+      const snap = await dbFs.collection("emotes").get();
+      snap.forEach((doc) => {
+        const data = doc.data() as any;
+        if (data && data.id && data.channel_username) {
+          if (!db.emotes.some((item) => item.id === data.id)) {
+            db.emotes.push({
+              id: data.id,
+              channel_username: data.channel_username,
+              code: data.code || "",
+              name: data.name || "",
+              image_url: data.image_url || "",
+              created_at: data.created_at || new Date().toISOString(),
+            });
+          }
+        }
+      });
+      console.log(`[restoreEmotesFromFirestore] Restored ${db.emotes.length} emotes (including globals) from Firestore.`);
+    } catch (e) {
+      console.error("Error restoring emotes from Firestore:", e);
+    }
+  } else if (firebaseConfig.projectId && firebaseConfig.apiKey) {
+    try {
+      const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
+      const listUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents/emotes?key=${firebaseConfig.apiKey}&pageSize=300`;
+      const response = await fetch(listUrl);
+      if (response.ok) {
+        const listData = await response.json();
+        if (Array.isArray(listData.documents)) {
+          for (const doc of listData.documents) {
+            const fields = doc.fields || {};
+            const id = fields.id?.stringValue || doc.name.split("/").pop() || "";
+            if (id && !db.emotes.some((item) => item.id === id)) {
+              db.emotes.push({
+                id: id,
+                channel_username: fields.channel_username?.stringValue || "",
+                code: fields.code?.stringValue || "",
+                name: fields.name?.stringValue || "",
+                image_url: fields.image_url?.stringValue || "",
+                created_at: fields.created_at?.stringValue || new Date().toISOString(),
+              });
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Error restoring emotes via REST fallback:", e);
+    }
+  }
+}
+
 async function syncEmoteToFirestore(emote: EmoteDoc) {
   if (!emote || !emote.id) return;
   const emoteData = {
@@ -1536,6 +1590,10 @@ app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 async function startServer() {
   const api = express.Router();
   const wsRooms = new Map<string, Set<WebSocket>>();
+
+  // Eagerly restore channels and emotes on startup
+  restoreChannelsFromFirestore().catch(() => {});
+  restoreEmotesFromFirestore().catch(() => {});
 
   // Root
   api.get("/", (req, res, next) => {
@@ -3141,80 +3199,10 @@ async function startServer() {
   // Emotes API
   api.get("/channels/:username/emotes", async (req, res) => {
     const uname = req.params.username.toLowerCase();
+    await restoreEmotesFromFirestore().catch(() => {});
     const list = db.emotes.filter(
       (e) => e.channel_username === "global" || e.channel_username.toLowerCase() === uname
     );
-
-    if (admin && admin.apps && admin.apps.length) {
-      try {
-        const querySnap = await admin.firestore()
-          .collection("emotes")
-          .where("channel_username", "==", uname)
-          .get();
-        querySnap.forEach((doc) => {
-          const data = doc.data() as any;
-          if (data && !list.some((item) => item.id === data.id)) {
-            list.push({
-              id: data.id || doc.id,
-              channel_username: data.channel_username,
-              code: data.code,
-              name: data.name,
-              image_url: data.image_url,
-              created_at: data.created_at || new Date().toISOString(),
-            });
-          }
-        });
-      } catch (err) {
-        console.error("Error reading emotes from Firestore:", err);
-      }
-    } else if (firebaseConfig.projectId && firebaseConfig.apiKey) {
-      try {
-        const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
-        const url = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents:runQuery?key=${firebaseConfig.apiKey}`;
-        const queryBody = {
-          structuredQuery: {
-            from: [{ collectionId: "emotes" }],
-            where: {
-              fieldFilter: {
-                field: { fieldPath: "channel_username" },
-                op: "EQUAL",
-                value: { stringValue: uname }
-              }
-            }
-          }
-        };
-        const response = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(queryBody)
-        });
-        if (response.ok) {
-          const results = await response.json();
-          if (Array.isArray(results)) {
-            for (const r of results) {
-              if (r.document && r.document.fields) {
-                const docId = r.document.name.split("/").pop();
-                const fields = r.document.fields;
-                const id = fields.id?.stringValue || docId;
-                if (!list.some((item) => item.id === id)) {
-                  list.push({
-                    id: id,
-                    channel_username: fields.channel_username?.stringValue || uname,
-                    code: fields.code?.stringValue || "",
-                    name: fields.name?.stringValue || "",
-                    image_url: fields.image_url?.stringValue || "",
-                    created_at: fields.created_at?.stringValue || new Date().toISOString(),
-                  });
-                }
-              }
-            }
-          }
-        }
-      } catch (err) {
-        // ignored
-      }
-    }
-
     res.json({ emotes: list });
   });
 
