@@ -1303,13 +1303,13 @@ const upload = multer({
   limits: { fileSize: 50 * 1024 * 1024 },
 });
 
-async function startServer() {
-  const app = express();
-  app.use(cors({ origin: "*", methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], allowedHeaders: ["*"] }));
-  app.options("*", cors());
-  app.use(express.json({ limit: "50mb", type: ["application/json", "application/*+json", "text/plain"] }));
-  app.use(express.urlencoded({ extended: true, limit: "50mb" }));
+export const app = express();
+app.use(cors({ origin: "*", methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], allowedHeaders: ["*"] }));
+app.options("*", cors());
+app.use(express.json({ limit: "50mb", type: ["application/json", "application/*+json", "text/plain"] }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
+async function startServer() {
   const api = express.Router();
 
   // Root
@@ -3136,23 +3136,26 @@ async function startServer() {
   ], api);
 
   // Vite Integration
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
+  if (!process.env.VERCEL) {
+    if (process.env.NODE_ENV !== "production") {
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      });
+      app.use(vite.middlewares);
+    } else {
+      const distPath = path.join(process.cwd(), "dist");
+      app.use(express.static(distPath));
+      app.get("*", (req, res) => {
+        res.sendFile(path.join(distPath, "index.html"));
+      });
+    }
   }
 
   // HTTP Server & WebSocket
-  const server = http.createServer(app);
-  const wss = new WebSocketServer({ noServer: true });
+  if (!process.env.VERCEL) {
+    const server = http.createServer(app);
+    const wss = new WebSocketServer({ noServer: true });
 
   // WebSocket connections map: channel_username -> Set<WebSocket>
   const wsRooms = new Map<string, Set<WebSocket>>();
@@ -3349,8 +3352,9 @@ async function startServer() {
   server.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);
   });
+  }
 }
 
-startServer().catch((err) => {
+export const setupPromise = startServer().catch((err) => {
   console.error("Failed to start server:", err);
 });
