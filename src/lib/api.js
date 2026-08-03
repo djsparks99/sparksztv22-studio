@@ -28,6 +28,15 @@ api.interceptors.request.use(async (config) => {
     config.headers.Authorization = `Bearer ${token}`;
   }
 
+  // Explicitly resolve the request URL to avoid page-relative path resolution bugs (e.g. /channels/username/api/...)
+  if (config.url && !/^https?:\/\//i.test(config.url)) {
+    const cleanUrl = config.url.startsWith("/") ? config.url : `/${config.url}`;
+    const base = API.replace(/\/$/, "");
+    const path = cleanUrl.replace(/^\//, "");
+    config.url = `${base}/${path}`;
+    config.baseURL = "";
+  }
+
   // Convert FormData to Base64 JSON payload to prevent 405 errors from proxies rejecting multipart uploads
   if (config.data instanceof FormData) {
     const jsonPayload = {};

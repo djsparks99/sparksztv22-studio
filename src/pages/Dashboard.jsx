@@ -282,16 +282,24 @@ export default function Dashboard() {
         return;
       }
 
-      // Fallback 1: serverless function endpoint
+      // Fallback 1: livepeer streams endpoint on standalone backend
       let response = null;
       try {
-        response = await fetch("/livepeer/streams", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: `${channel?.username || "stream"}-session` }),
-        });
+        const res = await api.post("/livepeer/streams", { name: `${channel?.username || "stream"}-session` });
+        if (res && res.data) {
+          response = { ok: true, json: () => Promise.resolve(res.data) };
+        }
       } catch (fnErr) {
-        console.warn("Serverless /livepeer/streams fetch failed:", fnErr);
+        console.warn("Backend /livepeer/streams fetch failed, attempting backup...", fnErr);
+        try {
+          response = await fetch("/livepeer/streams", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: `${channel?.username || "stream"}-session` }),
+          });
+        } catch (localErr) {
+          console.warn("Local fallback failed:", localErr);
+        }
       }
 
       if (response && response.ok) {
