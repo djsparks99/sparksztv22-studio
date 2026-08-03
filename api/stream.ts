@@ -1,4 +1,4 @@
-import { app, setupPromise } from "../server";
+import { app, setupPromise } from "../server.js";
 
 export default async function handler(req: any, res: any) {
   // Direct CORS and method-allow headers

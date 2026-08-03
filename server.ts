@@ -1311,6 +1311,7 @@ app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 async function startServer() {
   const api = express.Router();
+  const wsRooms = new Map<string, Set<WebSocket>>();
 
   // Root
   api.get("/", (req, res, next) => {
@@ -2381,10 +2382,10 @@ async function startServer() {
   });
 
   // List channels
-  api.get("/channels", (req, res) => {
+  api.get("/channels", async (req, res) => {
     const { category, live_only, following, q, search } = req.query;
     const searchQuery = String(q || search || "").trim().toLowerCase();
-    const user = authenticateToken(req);
+    const user = await authenticateToken(req);
 
     let list = Array.from(db.channels.values());
 
@@ -2436,7 +2437,7 @@ async function startServer() {
   // Get channel by username
   api.get("/channels/:username", async (req, res) => {
     const uname = req.params.username.toLowerCase();
-    const user = authenticateToken(req);
+    const user = await authenticateToken(req);
 
     let found: ChannelDoc | null = null;
     for (const c of db.channels.values()) {
@@ -3158,7 +3159,6 @@ async function startServer() {
     const wss = new WebSocketServer({ noServer: true });
 
   // WebSocket connections map: channel_username -> Set<WebSocket>
-  const wsRooms = new Map<string, Set<WebSocket>>();
 
   server.on("upgrade", (request, socket, head) => {
     const url = new URL(request.url || "", `http://${request.headers.host}`);

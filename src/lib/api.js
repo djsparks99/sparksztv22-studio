@@ -3,10 +3,25 @@ import axios from "axios";
 // Unified relative/absolute API configuration across all environments (Vercel, Node stand-alone, dev/prod)
 const rawApiUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_BACKEND_URL || "";
 
-export const BACKEND = rawApiUrl ? rawApiUrl.replace(/\/api\/?$/, "") : "";
-export const API = rawApiUrl
-  ? (rawApiUrl.endsWith("/api") || rawApiUrl.endsWith("/api/") ? rawApiUrl : `${rawApiUrl.replace(/\/$/, "")}/api`)
-  : "/api";
+// Ensure API base URL is always absolute-to-root (starts with '/') or a fully-qualified URL
+let resolvedApi = "/api";
+if (typeof window !== "undefined" && window.location && window.location.origin) {
+  // Prefer the current window origin in the browser to avoid stale hardcoded or environment-configured backend URLs (like Vercel)
+  resolvedApi = `${window.location.origin}/api`;
+} else if (rawApiUrl) {
+  if (/^https?:\/\//i.test(rawApiUrl)) {
+    resolvedApi = rawApiUrl;
+  } else {
+    resolvedApi = rawApiUrl.startsWith("/") ? rawApiUrl : `/${rawApiUrl}`;
+  }
+}
+
+if (!resolvedApi.endsWith("/api") && !resolvedApi.endsWith("/api/")) {
+  resolvedApi = `${resolvedApi.replace(/\/$/, "")}/api`;
+}
+
+export const API = resolvedApi;
+export const BACKEND = API.replace(/\/api\/?$/, "");
 
 export const api = axios.create({ baseURL: API });
 
@@ -28,12 +43,25 @@ api.interceptors.request.use(async (config) => {
     config.headers.Authorization = `Bearer ${token}`;
   }
 
-  // Explicitly resolve the request URL to avoid page-relative path resolution bugs (e.g. /channels/username/api/...)
+  // Explicitly resolve the request URL to avoid page-relative path resolution bugs or absolute path baseURL bypass (e.g. /stories ignoring /api)
   if (config.url && !/^https?:\/\//i.test(config.url)) {
-    const cleanUrl = config.url.startsWith("/") ? config.url : `/${config.url}`;
-    const base = API.replace(/\/$/, "");
-    const path = cleanUrl.replace(/^\//, "");
-    config.url = `${base}/${path}`;
+    const cleanUrl = config.url.replace(/^\//, "");
+    if (/^https?:\/\//i.test(API)) {
+      const parsedApi = new URL(API);
+      const apiPath = parsedApi.pathname.replace(/\/$/, "");
+      if (!cleanUrl.startsWith(apiPath.replace(/^\//, ""))) {
+        config.url = `${API.replace(/\/$/, "")}/${cleanUrl}`;
+      } else if (!config.url.startsWith("http")) {
+        config.url = `${API.replace(/\/$/, "").replace(apiPath, "")}/${config.url.replace(/^\//, "")}`;
+      }
+    } else {
+      const apiPath = API.replace(/^\//, "").replace(/\/$/, "");
+      if (!cleanUrl.startsWith(apiPath + "/") && cleanUrl !== apiPath) {
+        config.url = `/${apiPath}/${cleanUrl}`;
+      } else {
+        config.url = config.url.startsWith("/") ? config.url : `/${config.url}`;
+      }
+    }
     config.baseURL = "";
   }
 
