@@ -114,7 +114,7 @@ export default function TopStreamersHero({ allChannels = [] }) {
       
       <div className="relative mx-auto max-w-[1440px] px-4 py-6 sm:px-6 lg:py-8">
         {/* Section Title Header */}
-        <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between" id="hero-header-section">
           <div>
             <div className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.2em] text-[#e5ff00]">
               <Flame className="h-3.5 w-3.5 text-[#e5ff00]" />
@@ -142,13 +142,25 @@ export default function TopStreamersHero({ allChannels = [] }) {
           </div>
         </div>
 
-        {/* Hero Grid layout */}
-        <div className="grid gap-5 lg:grid-cols-12 lg:items-stretch">
-          {/* Main Selected Top Streamer Display (8 cols) */}
-          <div className="lg:col-span-8">
-            <div className="group flex h-full flex-col overflow-hidden border border-[#27272a] bg-[#0a0a0a] transition-all hover:border-[#e5ff00]">
+        {/* Single Two-Column Layout */}
+        <div className="grid grid-cols-1 gap-8 lg:grid-cols-12 lg:items-center mt-6 border-t border-[#1f1f23] pt-8" id="two-column-layout-section">
+          {/* Left Column (New Hero Section) */}
+          <div className="flex flex-col justify-center lg:col-span-5 py-6 pr-4" id="left-column-hero-text">
+            <h2 className="font-display text-4xl sm:text-5xl md:text-6xl font-black uppercase tracking-tight text-[#e5ff00] drop-shadow-[0_0_20px_rgba(229,255,0,0.35)] leading-none select-none">
+              YOUR <span className="text-white">STREAM</span> <br />
+              YOUR <span className="text-white">MIX</span> <br />
+              YOUR <span className="text-white">RULES</span>
+            </h2>
+            <p className="mt-4 font-mono text-xs sm:text-sm text-zinc-500 max-w-md uppercase tracking-widest">
+              // DECENTRALIZED BROADCAST PROTOCOL. NO CENSORSHIP. FULL CONTROL.
+            </p>
+          </div>
+
+          {/* Right Column (Preview Stream Card) */}
+          <div className="lg:col-span-7" id="featured-streamer-player">
+            <div className="group flex flex-col overflow-hidden border border-[#27272a] bg-[#0a0a0a] transition-all hover:border-[#e5ff00] w-full">
               {/* Thumbnail / Video Banner */}
-              <div className="relative aspect-[16/9] max-h-[340px] w-full overflow-hidden bg-black sm:max-h-[380px]">
+              <div className="relative aspect-[16/9] max-h-[360px] w-full overflow-hidden bg-black sm:max-h-[400px]">
                 <img
                   src={activeThumb}
                   alt={activeStreamer.display_name || activeSlug}
@@ -159,7 +171,7 @@ export default function TopStreamersHero({ allChannels = [] }) {
                 {/* Top Badges */}
                 <div className="absolute left-3 top-3 flex flex-wrap items-center gap-2">
                   <span className="flex items-center gap-1 bg-[#e5ff00] px-2.5 py-0.5 font-mono text-[11px] font-black uppercase text-black">
-                    <Trophy className="h-3 w-3" /> #{selectedIdx + 1} TOP STREAM
+                    <Trophy className="h-3 w-3" /> TOP STREAM
                   </span>
                   {isLive ? (
                     <span className="live-badge !px-2 !py-0.5 !text-[11px]">
@@ -188,7 +200,7 @@ export default function TopStreamersHero({ allChannels = [] }) {
               </div>
 
               {/* Channel Meta Information */}
-              <div className="mt-auto p-4 sm:p-5">
+              <div className="p-4 sm:p-5">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-3.5 min-w-0">
                     {activeStreamer.photo_url ? (
@@ -225,108 +237,6 @@ export default function TopStreamersHero({ allChannels = [] }) {
                     </Link>
                   </div>
                 </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Leaderboard List Sidebar (4 cols) */}
-          <div className="lg:col-span-4">
-            <div className="flex h-full flex-col border border-[#27272a] bg-[#0a0a0a]">
-              <div className="flex items-center justify-between border-b border-[#27272a] px-3.5 py-2.5 bg-[#0f0f11]">
-                <div className="flex items-center gap-2 font-mono text-xs font-bold uppercase tracking-wider text-zinc-300">
-                  <Trophy className="h-3.5 w-3.5 text-[#e5ff00]" /> TOP STREAMS
-                </div>
-                <span className="font-mono text-[10px] text-zinc-500">SORTED BY VIEWS</span>
-              </div>
-
-              <div className="divide-y divide-[#27272a] flex-1 overflow-y-auto max-h-[380px] lg:max-h-none">
-                {topStreamers.map((st, idx) => {
-                  const slug = st.username || st.channel_id || st.id;
-                  const views = Number(st.viewer_count || st.viewerCount || st.views || 0);
-                  const isStLive = Boolean(st.is_live || st.isLive);
-                  const isSelected = selectedIdx === idx;
-
-                  return (
-                    <button
-                      key={st.id || slug || idx}
-                      onClick={() => setSelectedIdx(idx)}
-                      data-testid={`top-streamer-rank-${idx + 1}`}
-                      className={`group flex w-full items-center justify-between px-3 py-2.5 text-left transition-colors ${
-                        isSelected
-                          ? "bg-[#0a0a0a] border-l-4 border-l-[#e5ff00]"
-                          : "hover:bg-[#080808]"
-                      }`}
-                    >
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        {/* Rank Badge */}
-                        <div
-                          className={`flex h-6 w-6 shrink-0 items-center justify-center font-mono text-[11px] font-black ${
-                            idx === 0
-                              ? "bg-[#e5ff00] text-black"
-                              : idx === 1
-                              ? "bg-zinc-300 text-black"
-                              : idx === 2
-                              ? "bg-amber-700 text-white"
-                              : "border border-[#27272a] bg-black text-zinc-400"
-                          }`}
-                        >
-                          #{idx + 1}
-                        </div>
-
-                        {/* Avatar */}
-                        {st.photo_url ? (
-                          <img
-                            src={fileUrl(st.photo_url)}
-                            alt=""
-                            className="h-8 w-8 shrink-0 border border-[#27272a] object-cover"
-                          />
-                        ) : (
-                          <div className="flex h-8 w-8 shrink-0 items-center justify-center border border-[#27272a] bg-black text-zinc-400">
-                            <User className="h-3.5 w-3.5" />
-                          </div>
-                        )}
-
-                        {/* Text Meta */}
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1 truncate">
-                            <span className="font-mono text-xs font-bold text-white group-hover:text-[#e5ff00]">
-                              {st.display_name || st.username}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-1.5 font-mono text-[10px] text-zinc-400">
-                            {isStLive ? (
-                              <span className="flex items-center gap-1 text-[#e5ff00]">
-                                <span className="h-1.5 w-1.5 rounded-full bg-[#e5ff00] animate-pulse" /> LIVE
-                              </span>
-                            ) : (
-                              <span className="text-zinc-500">OFFLINE</span>
-                            )}
-                            {st.category && <span className="truncate">• {st.category}</span>}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Right View Tally */}
-                      <div className="ml-2 flex shrink-0 items-center gap-1 font-mono text-xs font-bold text-[#e5ff00]">
-                        <Eye className="h-3 w-3" />
-                        <span>{views}</span>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Bottom Footer CTA */}
-              <div className="mt-auto border-t border-[#27272a] px-3 py-2 bg-[#09090b]">
-                <Link
-                  to="/register"
-                  className="flex items-center justify-between text-[11px] font-mono uppercase tracking-wider text-zinc-400 hover:text-white"
-                >
-                  <span>WANT TO RANK HERE?</span>
-                  <span className="flex items-center gap-1 text-[#e5ff00] font-bold">
-                    GO LIVE <ArrowRight className="h-3 w-3" />
-                  </span>
-                </Link>
               </div>
             </div>
           </div>

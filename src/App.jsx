@@ -64,7 +64,7 @@ function SiteLayout() {
     <>
       <Navbar />
       <LiveSidebar />
-      <div className={sidebarWidthClass}>
+      <div className={`${sidebarWidthClass} pt-16`}>
         <main className="relative z-10">
           <Outlet />
         </main>

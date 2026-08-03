@@ -709,11 +709,11 @@ function EmptyState({ collapsed, isLoggedIn }) {
     return (
       <div className="px-4 py-8 text-center">
         <Heart className="mx-auto h-5 w-5 text-zinc-600" />
-        <div className="mt-3 font-mono text-[10px] uppercase tracking-widest text-zinc-400 font-bold">
-          // SIGN IN FOR FOLLOWS
+        <div className="mt-3 font-mono text-[10px] uppercase tracking-widest text-[#e5ff00] font-bold">
+          // CLAIM YOUR FREQUENCY
         </div>
-        <p className="mt-2 font-mono text-[10px] leading-relaxed text-zinc-500">
-          Sign in to follow broadcasters and see their live status, neon story rings, & chime reminders.
+        <p className="mt-2 font-mono text-[10px] leading-relaxed text-zinc-300">
+          STREAM TO THE WORLD
         </p>
         <Link
           to="/login"

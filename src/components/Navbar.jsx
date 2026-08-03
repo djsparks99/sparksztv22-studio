@@ -100,7 +100,7 @@ export default function Navbar() {
   return (
     <header
       data-testid="site-navbar"
-      className="sticky top-0 z-40 border-b border-[#27272a] bg-[#050505]/95 backdrop-blur"
+      className="fixed top-0 left-0 right-0 z-40 border-b border-[#27272a] bg-[#050505]/95 backdrop-blur w-full"
     >
       <div className="w-full flex h-16 items-center justify-between px-2 sm:px-4">
         <div className="flex items-center gap-6 md:gap-8">
