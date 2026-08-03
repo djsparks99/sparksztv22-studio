@@ -1,8 +1,12 @@
 import axios from "axios";
 
-// Unified relative API configuration across all environments (preview & live site)
-export const API = "/api";
-export const BACKEND = "";
+// Unified relative/absolute API configuration across all environments (Vercel, Node stand-alone, dev/prod)
+const rawApiUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_BACKEND_URL || "";
+
+export const BACKEND = rawApiUrl ? rawApiUrl.replace(/\/api\/?$/, "") : "";
+export const API = rawApiUrl
+  ? (rawApiUrl.endsWith("/api") || rawApiUrl.endsWith("/api/") ? rawApiUrl : `${rawApiUrl.replace(/\/$/, "")}/api`)
+  : "/api";
 
 export const api = axios.create({ baseURL: API });
 
@@ -113,7 +117,7 @@ export function fileUrl(pathOrUrl) {
     return pathOrUrl;
   }
   const cleanPath = pathOrUrl.startsWith("/") ? pathOrUrl : `/${pathOrUrl}`;
-  return cleanPath;
+  return BACKEND ? `${BACKEND}${cleanPath}` : cleanPath;
 }
 
 export async function uploadImage(url, file, extraData = {}) {
