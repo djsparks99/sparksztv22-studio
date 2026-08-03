@@ -1390,8 +1390,7 @@ async function startServer() {
         body.is_live === true ||
         body.isLive === true ||
         body.is_live === "true" ||
-        body.isLive === "true" ||
-        (!eventType.includes("idle") && !eventType.includes("off") && !eventType.includes("end") && !eventType.includes("stop"))
+        body.isLive === "true"
       ) {
         isLive = true;
       }
@@ -1588,16 +1587,18 @@ async function startServer() {
         }
       }
 
-      if (!livepeerChecked && activePlaybackId) {
+      if (!livepeerChecked && apiKey && activePlaybackId) {
         try {
-          const hlsRes = await fetch(`https://livepeercdn.studio/hls/${activePlaybackId}/index.m3u8`, {
-            method: "HEAD",
+          const pbRes = await fetch(`https://livepeer.studio/api/playback/${activePlaybackId}`, {
+            headers: { Authorization: `Bearer ${apiKey}` },
           });
-          if (hlsRes.ok) {
-            isLive = true;
+          if (pbRes.ok) {
+            const pbData = await pbRes.json();
+            isLive = Boolean(pbData?.meta?.live || pbData?.meta?.isLive || pbData?.type === "live" && pbData?.meta?.live);
+            livepeerChecked = true;
           }
-        } catch {
-          // Keep as false
+        } catch (e) {
+          console.error("[Livepeer Playback API Error]:", e);
         }
       }
 

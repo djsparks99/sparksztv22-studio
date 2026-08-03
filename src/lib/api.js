@@ -38,6 +38,15 @@ export const BACKEND = BACKEND_URL;
 
 export const api = axios.create({ baseURL: API });
 
+api.interceptors.request.use((config) => {
+  const token = getToken();
+  if (token) {
+    config.headers = config.headers || {};
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
 const TOKEN_KEY = "pr_token";
 
 export function getToken() {
@@ -73,11 +82,18 @@ export function formatApiErrorDetail(detail) {
 /** Extract the human-facing error message from an axios error response body. */
 export function apiErrorMessage(err) {
   const data = err?.response?.data;
-  if (!data) return "Something went wrong.";
-  // Uniform new-style errors from backend: { "error": "..." }
-  if (typeof data.error === "string") return data.error;
-  // Legacy FastAPI errors: { "detail": "..." | [...] }
-  if (data.detail != null) return formatApiErrorDetail(data.detail);
+  if (data) {
+    if (typeof data.error === "string") return data.error;
+    if (typeof data === "string") return data;
+    if (data.detail != null) return formatApiErrorDetail(data.detail);
+    if (data.message && typeof data.message === "string") return data.message;
+  }
+  if (err?.message) {
+    if (err.message === "Network Error") {
+      return "Network error - please check your server connection.";
+    }
+    return err.message;
+  }
   return "Something went wrong.";
 }
 
