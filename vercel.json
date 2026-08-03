@@ -10,7 +10,15 @@
       "destination": "/api/users.ts"
     },
     {
+      "source": "/api/users/:path*",
+      "destination": "/api/users.ts"
+    },
+    {
       "source": "/api/stream",
+      "destination": "/api/stream.ts"
+    },
+    {
+      "source": "/api/stream/:path*",
       "destination": "/api/stream.ts"
     },
     {
@@ -22,7 +30,7 @@
       "destination": "/api/index.ts"
     },
     {
-      "source": "/(.*)",
+      "source": "/((?!api|uploads).*)",
       "destination": "/index.html"
     }
   ],
