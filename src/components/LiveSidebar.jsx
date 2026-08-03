@@ -255,7 +255,18 @@ export default function LiveSidebar() {
               viewer_count: data.viewer_count ?? existing.viewer_count ?? 0,
               stream_title: data.stream_title || existing.stream_title,
               category: data.category || existing.category,
-              schedule: data.schedule || existing.schedule,
+              schedule:
+                Array.isArray(data.schedule)
+                  ? data.schedule
+                  : data.schedule_json
+                  ? (() => {
+                      try {
+                        return JSON.parse(data.schedule_json);
+                      } catch (e) {
+                        return existing.schedule;
+                      }
+                    })()
+                  : existing.schedule,
             });
           });
 
@@ -328,7 +339,7 @@ export default function LiveSidebar() {
   return (
     <aside
       data-testid="live-sidebar"
-      className={`fixed left-0 top-[calc(4rem+var(--ticker-height,37px))] z-30 hidden h-[calc(100vh-4rem-var(--ticker-height,37px))] flex-col border-r border-[#27272a] bg-[#050505] lg:flex ${
+      className={`fixed left-0 top-16 z-30 hidden h-[calc(100vh-4rem)] flex-col border-r border-[#27272a] bg-[#050505] lg:flex ${
         collapsed ? "w-[60px]" : "w-[240px]"
       } transition-[width,top,height] duration-150 overflow-x-hidden`}
     >

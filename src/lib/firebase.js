@@ -115,4 +115,32 @@ export async function savePermanentUsername(uid, { username, display_name, email
   return userData;
 }
 
+export async function updateUserProfileInFirestore(uid, updates, username = null) {
+  if (!uid || !updates) return;
+  try {
+    const userRef = doc(db, "users", uid);
+    await setDoc(userRef, updates, { merge: true });
+
+    const channelUpdates = {};
+    if (updates.display_name !== undefined) channelUpdates.display_name = updates.display_name;
+    if (updates.photo_url !== undefined) channelUpdates.photo_url = updates.photo_url;
+    if (updates.thumbnail_url !== undefined) channelUpdates.thumbnail_url = updates.thumbnail_url;
+
+    if (Object.keys(channelUpdates).length > 0) {
+      await setDoc(doc(db, "channels", uid), channelUpdates, { merge: true });
+      if (username) {
+        await setDoc(doc(db, "channels", username.toLowerCase()), channelUpdates, { merge: true });
+      } else {
+        const userSnap = await getDoc(userRef);
+        if (userSnap.exists() && userSnap.data()?.username) {
+          const uname = String(userSnap.data().username).toLowerCase();
+          await setDoc(doc(db, "channels", uname), channelUpdates, { merge: true });
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("Client Firestore user profile update warning:", err);
+  }
+}
+
 export { onAuthStateChanged };

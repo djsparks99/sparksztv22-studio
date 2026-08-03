@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { api, fileUrl } from "@/lib/api";
+import { api, fileUrl, apiErrorMessage } from "@/lib/api";
 import { Smile, Plus, Trash2, Zap, Upload, Image as ImageIcon } from "lucide-react";
 import { toast } from "sonner";
 
@@ -52,9 +52,7 @@ export default function EmoteManager({ channel }) {
         formData.append("image_url", imageUrl);
       }
 
-      await api.post("/channels/mine/emotes", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
+      await api.post("/channels/mine/emotes", formData);
 
       toast.success("Emote uploaded successfully!");
       setCode("");
@@ -64,7 +62,8 @@ export default function EmoteManager({ channel }) {
       if (fileInputRef.current) fileInputRef.current.value = "";
       loadEmotes();
     } catch (err) {
-      toast.error(err.response?.data?.error || "Failed to upload emote.");
+      console.error("Emote upload error:", err);
+      toast.error(apiErrorMessage(err) || "Failed to upload emote.");
     } finally {
       setUploading(false);
     }

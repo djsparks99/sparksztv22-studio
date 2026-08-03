@@ -50,15 +50,15 @@ export function AuthProvider({ children }) {
           email: fbUser.email || userDoc.email,
           username: userDoc.username,
           display_name: userDoc.display_name,
-          photo_url: fbUser.photoURL || userDoc.photo_url || null,
+          photo_url: userDoc.photo_url || fbUser.photoURL || null,
           bio: userDoc.bio || "",
           username_locked: true,
           created_at: userDoc.created_at,
         };
+        await syncExpressToken(fbUser, profile);
         setUser(profile);
         setNeedsUsername(false);
         setPendingFirebaseUser(null);
-        await syncExpressToken(fbUser, profile);
       } else {
         // User logged in but hasn't set locked username in Firestore
         setPendingFirebaseUser(fbUser);
@@ -148,6 +148,21 @@ export function AuthProvider({ children }) {
     setToken(null);
   };
 
+  const refresh = useCallback(async () => {
+    if (auth?.currentUser) {
+      await handleFirebaseUserChange(auth.currentUser);
+    } else {
+      try {
+        const { data } = await api.get("/users/me");
+        if (data && data.uid) {
+          setUser((prev) => ({ ...prev, ...data }));
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }, [handleFirebaseUserChange]);
+
   return (
     <AuthContext.Provider
       value={{
@@ -160,6 +175,8 @@ export function AuthProvider({ children }) {
         completeUsernameLock,
         logout,
         setUser,
+        refresh,
+        refreshUser: refresh,
       }}
     >
       {children}

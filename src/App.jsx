@@ -3,7 +3,6 @@ import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from "rea
 import { AuthProvider, useAuth } from "@/lib/auth-context";
 import { Toaster } from "@/components/ui/sonner";
 import Navbar from "@/components/Navbar";
-import FrequencyShoutboxTicker from "@/components/FrequencyShoutboxTicker";
 import LiveSidebar from "@/components/LiveSidebar";
 import UsernameLockModal from "@/components/UsernameLockModal";
 import Footer from "@/components/Footer";
@@ -64,7 +63,6 @@ function SiteLayout() {
   return (
     <>
       <Navbar />
-      <FrequencyShoutboxTicker />
       <LiveSidebar />
       <div className={sidebarWidthClass}>
         <main className="relative z-10">

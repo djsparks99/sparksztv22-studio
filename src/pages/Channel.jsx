@@ -64,15 +64,28 @@ export default function Channel() {
     load();
 
     // Also listen to Firestore doc for real-time live state changes
+    const targetDocId = username ? username.toLowerCase() : "";
     const unsub = onSnapshot(
-      doc(db, "channels", username),
+      doc(db, "channels", targetDocId),
       (docSnap) => {
         if (docSnap.exists() && !cancelled) {
           const fsData = docSnap.data();
-          setChannel((prev) => ({
-            ...prev,
-            ...fsData,
-          }));
+          let fsSchedule = fsData.schedule;
+          if (!Array.isArray(fsSchedule) && fsData.schedule_json) {
+            try {
+              fsSchedule = JSON.parse(fsData.schedule_json);
+            } catch (e) {}
+          }
+          setChannel((prev) => {
+            const finalSchedule = Array.isArray(fsSchedule)
+              ? fsSchedule
+              : (Array.isArray(prev?.schedule) ? prev.schedule : []);
+            return {
+              ...prev,
+              ...fsData,
+              schedule: finalSchedule,
+            };
+          });
         }
       },
       (err) => {
@@ -134,7 +147,7 @@ export default function Channel() {
   const ownChannel = user?.username === channel.username;
 
   return (
-    <div className="mx-auto max-w-[1440px] px-6 py-6" data-testid={`channel-page-${username}`}>
+    <div className="mx-auto max-w-[1440px] px-6 pt-6 pb-24 sm:pb-28 lg:pb-32" data-testid={`channel-page-${username}`}>
       <Link
         to="/"
         data-testid="back-to-browse"

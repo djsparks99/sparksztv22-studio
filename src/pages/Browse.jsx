@@ -135,7 +135,7 @@ export default function Browse() {
       <Marquee items={CATEGORIES.map((c) => c.toUpperCase())} />
 
       {/* Filters + Grid */}
-      <section id="grid" className="mx-auto max-w-[1440px] px-6 py-12">
+      <section id="grid" className="mx-auto max-w-[1440px] px-6 pt-12 pb-24 sm:pb-28 lg:pb-32">
         <div className="mb-8 flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-end">
           <div>
             <div className="label-caps">Signal Directory</div>

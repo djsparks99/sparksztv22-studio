@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Calendar, Plus, Trash2, Clock, Music, Save, Check } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, apiErrorMessage } from "@/lib/api";
 import { db } from "@/lib/firebase";
 import { doc, setDoc } from "firebase/firestore";
 import { toast } from "sonner";
@@ -67,40 +67,47 @@ export default function ScheduleManager({ channel, onChange }) {
     setSavedSuccess(false);
     try {
       // 1. Update backend memory & Livepeer state
-      const { data } = await api.patch("/channels/mine", { schedule });
+      let responseData;
+      try {
+        const { data } = await api.patch("/channels/mine", { schedule });
+        responseData = data;
+      } catch (errPrimary) {
+        console.warn("Primary PATCH /channels/mine failed, trying dedicated schedule route:", errPrimary);
+        const { data } = await api.post("/channels/mine/schedule", { schedule });
+        responseData = data;
+      }
 
       // 2. Persist directly to Firestore for real-time subscribers
+      const schedulePayload = {
+        schedule,
+        schedule_json: JSON.stringify(schedule),
+        last_updated: new Date().toISOString(),
+      };
+
       if (channel?.username) {
         try {
-          await setDoc(
-            doc(db, "channels", channel.username),
-            { schedule, last_updated: new Date().toISOString() },
-            { merge: true }
-          );
+          await setDoc(doc(db, "channels", channel.username.toLowerCase()), schedulePayload, { merge: true });
+          await setDoc(doc(db, "channels", channel.username), schedulePayload, { merge: true });
         } catch (fsErr) {
           console.warn("Firestore schedule sync notice:", fsErr);
         }
       }
 
-      if (channel?.channel_id && channel?.channel_id !== channel?.username) {
+      if (channel?.channel_id) {
         try {
-          await setDoc(
-            doc(db, "channels", channel.channel_id),
-            { schedule, last_updated: new Date().toISOString() },
-            { merge: true }
-          );
+          await setDoc(doc(db, "channels", channel.channel_id), schedulePayload, { merge: true });
         } catch (fsErr) {
           console.warn("Firestore schedule channel_id sync notice:", fsErr);
         }
       }
 
-      if (onChange) onChange(data);
+      if (onChange && responseData) onChange(responseData);
       setSavedSuccess(true);
       toast.success("Broadcast schedule updated & published!");
       setTimeout(() => setSavedSuccess(false), 3000);
     } catch (err) {
       console.error("Failed to save schedule:", err);
-      toast.error("Could not save schedule. Please try again.");
+      toast.error(apiErrorMessage(err) || "Could not save schedule. Please try again.");
     } finally {
       setSaving(false);
     }

@@ -46,7 +46,7 @@ export default function Footer() {
   };
 
   return (
-    <footer className="mt-16 border-t border-[#27272a] bg-[#050505] text-zinc-400">
+    <footer className="mt-16 border-t border-[#27272a] bg-[#050505] text-zinc-400 pb-12 sm:pb-16">
       <div className="mx-auto max-w-[1440px] px-6 py-10">
         <div className="flex flex-col gap-8 md:flex-row md:items-center md:justify-between">
           

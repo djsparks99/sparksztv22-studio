@@ -87,62 +87,253 @@ async function createLivepeerStream(name: string): Promise<{
 }
 
 async function syncChannelToFirestore(c: ChannelDoc) {
-  if (!firebaseConfig.projectId || !firebaseConfig.apiKey) return;
-  try {
-    const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
-    const channelIdUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents/channels/${c.channel_id}?key=${firebaseConfig.apiKey}`;
-    const channelNameUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents/channels/${c.username}?key=${firebaseConfig.apiKey}`;
-    const userUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents/users/${c.user_uid}?key=${firebaseConfig.apiKey}`;
+  if (!c) return;
+  const channelData = {
+    channel_id: c.channel_id,
+    user_uid: c.user_uid,
+    username: c.username,
+    display_name: c.display_name,
+    photo_url: c.photo_url || "",
+    thumbnail_url: c.thumbnail_url || "",
+    livepeer_stream_id: c.livepeer_stream_id || "",
+    stream_key: c.stream_key || "",
+    playback_id: c.playback_id || "",
+    stream_title: c.stream_title || "",
+    category: c.category || "music",
+    is_live: Boolean(c.is_live),
+    viewer_count: c.viewer_count || 0,
+    rtmp_url: "rtmp://rtmp.livepeer.com/live",
+    playback_url: c.playback_id ? `https://livepeercdn.studio/hls/${c.playback_id}/index.m3u8` : "",
+    schedule: c.schedule || [],
+    schedule_json: JSON.stringify(c.schedule || []),
+    last_updated: new Date().toISOString(),
+  };
 
-    const fields = {
-      channel_id: { stringValue: c.channel_id },
-      user_uid: { stringValue: c.user_uid },
-      username: { stringValue: c.username },
-      display_name: { stringValue: c.display_name },
-      photo_url: { stringValue: c.photo_url || "" },
-      thumbnail_url: { stringValue: c.thumbnail_url || "" },
-      livepeer_stream_id: { stringValue: c.livepeer_stream_id || "" },
-      stream_key: { stringValue: c.stream_key || "" },
-      playback_id: { stringValue: c.playback_id || "" },
-      stream_title: { stringValue: c.stream_title || "" },
-      category: { stringValue: c.category || "music" },
-      is_live: { booleanValue: Boolean(c.is_live) },
-      viewer_count: { integerValue: c.viewer_count || 0 },
-      rtmp_url: { stringValue: "rtmp://rtmp.livepeer.com/live" },
-      playback_url: { stringValue: `https://livepeercdn.studio/hls/${c.playback_id}/index.m3u8` },
-      schedule_json: { stringValue: JSON.stringify(c.schedule || []) },
-      last_updated: { stringValue: new Date().toISOString() },
-    };
+  // 1. Primary: Firebase Admin SDK
+  if (admin && admin.apps && admin.apps.length) {
+    try {
+      const dbFs = admin.firestore();
+      const batch = dbFs.batch();
 
-    const payload = JSON.stringify({ fields });
+      if (c.channel_id) {
+        batch.set(dbFs.collection("channels").doc(c.channel_id), channelData, { merge: true });
+      }
+      if (c.username) {
+        batch.set(dbFs.collection("channels").doc(c.username.toLowerCase()), channelData, { merge: true });
+      }
+      if (c.user_uid) {
+        batch.set(dbFs.collection("users").doc(c.user_uid), {
+          ...channelData,
+          stream_id: c.livepeer_stream_id || "",
+        }, { merge: true });
+      }
 
-    // Sync to channels by channel_id
-    await fetch(channelIdUrl, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: payload,
-    }).catch(() => {});
+      await batch.commit();
+      console.log(`[syncChannelToFirestore Admin SDK] Successfully persisted channel "${c.username}" (stream_key="${c.stream_key}") to Firestore.`);
+    } catch (adminErr) {
+      console.error("[syncChannelToFirestore Admin SDK Error]:", adminErr);
+    }
+  }
 
-    // Sync to channels by username
-    await fetch(channelNameUrl, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: payload,
-    }).catch(() => {});
+  // 2. Fallback: REST API
+  if (firebaseConfig.projectId && firebaseConfig.apiKey) {
+    try {
+      const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
+      const channelIdUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents/channels/${c.channel_id}?key=${firebaseConfig.apiKey}`;
+      const channelNameUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents/channels/${c.username.toLowerCase()}?key=${firebaseConfig.apiKey}`;
+      const userUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents/users/${c.user_uid}?key=${firebaseConfig.apiKey}`;
 
-    // Sync to users document directly
-    await fetch(userUrl, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        fields: {
-          ...fields,
-          stream_id: { stringValue: c.livepeer_stream_id || "" },
-        },
-      }),
-    }).catch(() => {});
-  } catch (err) {
-    // Non-blocking
+      const fields = {
+        channel_id: { stringValue: c.channel_id },
+        user_uid: { stringValue: c.user_uid },
+        username: { stringValue: c.username },
+        display_name: { stringValue: c.display_name },
+        photo_url: { stringValue: c.photo_url || "" },
+        thumbnail_url: { stringValue: c.thumbnail_url || "" },
+        livepeer_stream_id: { stringValue: c.livepeer_stream_id || "" },
+        stream_key: { stringValue: c.stream_key || "" },
+        playback_id: { stringValue: c.playback_id || "" },
+        stream_title: { stringValue: c.stream_title || "" },
+        category: { stringValue: c.category || "music" },
+        is_live: { booleanValue: Boolean(c.is_live) },
+        viewer_count: { integerValue: c.viewer_count || 0 },
+        rtmp_url: { stringValue: "rtmp://rtmp.livepeer.com/live" },
+        playback_url: { stringValue: c.playback_id ? `https://livepeercdn.studio/hls/${c.playback_id}/index.m3u8` : "" },
+        schedule_json: { stringValue: JSON.stringify(c.schedule || []) },
+        last_updated: { stringValue: new Date().toISOString() },
+      };
+
+      const payload = JSON.stringify({ fields });
+
+      await Promise.allSettled([
+        fetch(channelIdUrl, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: payload }),
+        fetch(channelNameUrl, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: payload }),
+        fetch(userUrl, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fields: { ...fields, stream_id: { stringValue: c.livepeer_stream_id || "" } } }),
+        }),
+      ]);
+    } catch (err) {
+      // Non-blocking
+    }
+  }
+}
+
+async function syncUserToFirestore(u: UserDoc) {
+  if (!u || !u.uid) return;
+  const userData = {
+    uid: u.uid,
+    email: u.email || "",
+    username: u.username || "",
+    display_name: u.display_name || "",
+    photo_url: u.photo_url || "",
+    bio: u.bio || "",
+    created_at: u.created_at || new Date().toISOString(),
+    last_updated: new Date().toISOString(),
+  };
+
+  // 1. Primary: Firebase Admin SDK
+  if (admin && admin.apps && admin.apps.length) {
+    try {
+      const dbFs = admin.firestore();
+      const batch = dbFs.batch();
+      batch.set(dbFs.collection("users").doc(u.uid), userData, { merge: true });
+      if (u.username) {
+        batch.set(dbFs.collection("users").doc(u.username.toLowerCase()), userData, { merge: true });
+      }
+      await batch.commit();
+    } catch (err) {
+      console.error("[syncUserToFirestore Admin SDK Error]:", err);
+    }
+  }
+
+  // 2. Fallback: REST API
+  if (firebaseConfig.projectId && firebaseConfig.apiKey) {
+    try {
+      const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
+      const userUidUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents/users/${u.uid}?key=${firebaseConfig.apiKey}`;
+      const fields = {
+        uid: { stringValue: u.uid },
+        email: { stringValue: u.email || "" },
+        username: { stringValue: u.username || "" },
+        display_name: { stringValue: u.display_name || "" },
+        photo_url: { stringValue: u.photo_url || "" },
+        bio: { stringValue: u.bio || "" },
+        last_updated: { stringValue: new Date().toISOString() },
+      };
+      await fetch(userUidUrl, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fields }),
+      }).catch(() => {});
+    } catch (err) {
+      // Non-blocking
+    }
+  }
+}
+
+async function syncStoryToFirestore(story: StoryDoc) {
+  if (!story || !story.id) return;
+  const storyData = {
+    id: story.id,
+    user_uid: story.user_uid,
+    username: story.username,
+    display_name: story.display_name,
+    user_photo_url: story.user_photo_url || "",
+    media_url: story.media_url || "",
+    media_type: story.media_type || "image",
+    caption: story.caption || "",
+    created_at: story.created_at,
+    expires_at: story.expires_at,
+  };
+
+  if (admin && admin.apps && admin.apps.length) {
+    try {
+      const dbFs = admin.firestore();
+      await dbFs.collection("stories").doc(story.id).set(storyData, { merge: true });
+      console.log(`[syncStoryToFirestore Admin SDK] Persisted story "${story.id}" to Firestore.`);
+    } catch (err) {
+      console.error("[syncStoryToFirestore Admin SDK Error]:", err);
+    }
+  }
+
+  if (firebaseConfig.projectId && firebaseConfig.apiKey) {
+    try {
+      const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
+      const url = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents/stories/${story.id}?key=${firebaseConfig.apiKey}`;
+      const fields = {
+        id: { stringValue: story.id },
+        user_uid: { stringValue: story.user_uid },
+        username: { stringValue: story.username },
+        display_name: { stringValue: story.display_name },
+        user_photo_url: { stringValue: story.user_photo_url || "" },
+        media_url: { stringValue: story.media_url || "" },
+        media_type: { stringValue: story.media_type || "image" },
+        caption: { stringValue: story.caption || "" },
+        created_at: { stringValue: story.created_at },
+        expires_at: { stringValue: story.expires_at },
+      };
+      await fetch(url, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fields }),
+      }).catch(() => {});
+    } catch (e) {
+      // Non-blocking
+    }
+  }
+}
+
+async function deleteStoryFromFirestore(storyId: string) {
+  if (!storyId) return;
+  if (admin && admin.apps && admin.apps.length) {
+    try {
+      const dbFs = admin.firestore();
+      await dbFs.collection("stories").doc(storyId).delete();
+    } catch (e) {}
+  }
+  if (firebaseConfig.projectId && firebaseConfig.apiKey) {
+    try {
+      const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
+      const url = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents/stories/${storyId}?key=${firebaseConfig.apiKey}`;
+      await fetch(url, { method: "DELETE" }).catch(() => {});
+    } catch (e) {}
+  }
+}
+
+async function restoreStoriesFromFirestore() {
+  const now = Date.now();
+  if (admin && admin.apps && admin.apps.length) {
+    try {
+      const dbFs = admin.firestore();
+      const snap = await dbFs.collection("stories").get();
+      snap.forEach((doc) => {
+        const data = doc.data() as any;
+        if (data && data.id && data.expires_at) {
+          if (new Date(data.expires_at).getTime() > now) {
+            const existingIdx = db.stories.findIndex((s) => s.id === data.id);
+            const storyObj: StoryDoc = {
+              id: data.id,
+              user_uid: data.user_uid || "",
+              username: data.username || "",
+              display_name: data.display_name || "",
+              user_photo_url: data.user_photo_url || null,
+              media_url: data.media_url || "",
+              media_type: data.media_type === "video" ? "video" : "image",
+              caption: data.caption || "",
+              created_at: data.created_at || new Date().toISOString(),
+              expires_at: data.expires_at,
+            };
+            if (existingIdx !== -1) {
+              db.stories[existingIdx] = storyObj;
+            } else {
+              db.stories.push(storyObj);
+            }
+          }
+        }
+      });
+    } catch (e) {}
   }
 }
 
@@ -467,6 +658,47 @@ interface FileDoc {
   mimeType: string;
 }
 
+function saveUploadedFile(filePath: string, buffer: Buffer, mimeType: string) {
+  db.files.set(filePath, { data: buffer, mimeType });
+  try {
+    const diskPath = path.join(process.cwd(), "uploads", filePath);
+    fs.mkdirSync(path.dirname(diskPath), { recursive: true });
+    fs.writeFileSync(diskPath, buffer);
+  } catch (err) {
+    console.warn("Could not save file to disk:", err);
+  }
+}
+
+function getUploadedFile(filePath: string): { data: Buffer; mimeType: string } | null {
+  if (db.files.has(filePath)) {
+    return db.files.get(filePath)!;
+  }
+  try {
+    const diskPath = path.join(process.cwd(), "uploads", filePath);
+    if (fs.existsSync(diskPath)) {
+      const data = fs.readFileSync(diskPath);
+      const ext = path.extname(diskPath).toLowerCase().replace(".", "");
+      const mimeTypes: Record<string, string> = {
+        png: "image/png",
+        jpg: "image/jpeg",
+        jpeg: "image/jpeg",
+        webp: "image/webp",
+        gif: "image/gif",
+        svg: "image/svg+xml",
+        mp4: "video/mp4",
+        webm: "video/webm",
+      };
+      const mimeType = mimeTypes[ext] || "application/octet-stream";
+      const fileDoc = { data, mimeType };
+      db.files.set(filePath, fileDoc);
+      return fileDoc;
+    }
+  } catch (err) {
+    console.warn("Could not read file from disk:", err);
+  }
+  return null;
+}
+
 class InMemStore {
   users: Map<string, UserDoc> = new Map(); // uid -> user
   channels: Map<string, ChannelDoc> = new Map(); // channel_id -> channel
@@ -788,14 +1020,9 @@ function getSubscriberCount(channelUsername: string): number {
   ).length;
 }
 
-// Auth Middleware Helper
-async function authenticateToken(req: Request): Promise<UserDoc | null> {
-  const authHeader = req.headers["authorization"];
-  if (!authHeader) return null;
-  const token = authHeader.startsWith("Bearer ")
-    ? authHeader.slice(7)
-    : authHeader;
-  if (!token) return null;
+// Auth Token Resolver (supports both Express JWT & Firebase ID Tokens)
+async function findUserByToken(token: string | null): Promise<UserDoc | null> {
+  if (!token || token === "guest" || token === "null" || token === "undefined") return null;
 
   let uid: string | null = null;
   let emailFromToken: string | null = null;
@@ -889,7 +1116,19 @@ async function authenticateToken(req: Request): Promise<UserDoc | null> {
   return user;
 }
 
+// Auth Middleware Helper
+async function authenticateToken(req: Request): Promise<UserDoc | null> {
+  const authHeader = req.headers["authorization"];
+  if (!authHeader) return null;
+  const token = authHeader.startsWith("Bearer ")
+    ? authHeader.slice(7)
+    : authHeader;
+  return findUserByToken(token);
+}
+
 async function getOrRestoreUserChannel(user: UserDoc): Promise<ChannelDoc> {
+  let existingChannel: ChannelDoc | null = null;
+
   // 1. Check in-memory channels map
   for (const c of db.channels.values()) {
     if (
@@ -899,7 +1138,11 @@ async function getOrRestoreUserChannel(user: UserDoc): Promise<ChannelDoc> {
       c.user_uid = user.uid;
       c.username = user.username;
       c.display_name = user.display_name || c.display_name || user.username;
-      return c;
+      if (c.stream_key && c.playback_id) {
+        return c;
+      }
+      existingChannel = c;
+      break;
     }
   }
 
@@ -917,19 +1160,21 @@ async function getOrRestoreUserChannel(user: UserDoc): Promise<ChannelDoc> {
         const snap = await docRef.get().catch(() => null);
         if (snap && snap.exists) {
           const data = snap.data() as any;
-          if (data && (data.stream_key || data.streamKey || data.playback_id || data.playbackId)) {
+          const k = data.stream_key || data.streamKey || "";
+          const p = data.playback_id || data.playbackId || "";
+          if (k || p) {
             const channelDoc: ChannelDoc = {
-              channel_id: data.channel_id || data.channelId || user.uid,
+              channel_id: existingChannel?.channel_id || data.channel_id || data.channelId || user.uid,
               user_uid: user.uid,
               username: user.username,
               display_name: user.display_name || data.display_name || user.username,
               photo_url: user.photo_url || data.photo_url || null,
-              thumbnail_url: data.thumbnail_url || null,
-              livepeer_stream_id: data.livepeer_stream_id || data.stream_id || "",
-              stream_key: data.stream_key || data.streamKey || "",
-              playback_id: data.playback_id || data.playbackId || "",
-              stream_title: data.stream_title || `${user.display_name}'s Live Stream`,
-              category: data.category || "music",
+              thumbnail_url: data.thumbnail_url || existingChannel?.thumbnail_url || null,
+              livepeer_stream_id: data.livepeer_stream_id || data.stream_id || existingChannel?.livepeer_stream_id || "",
+              stream_key: k || existingChannel?.stream_key || "",
+              playback_id: p || existingChannel?.playback_id || "",
+              stream_title: data.stream_title || existingChannel?.stream_title || `${user.display_name}'s Live Stream`,
+              category: data.category || existingChannel?.category || "music",
               is_live: Boolean(data.is_live || data.isLive),
               viewer_count: Number(data.viewer_count || 0),
               record_enabled: true,
@@ -967,17 +1212,17 @@ async function getOrRestoreUserChannel(user: UserDoc): Promise<ChannelDoc> {
 
           if (streamKey || playbackId) {
             const channelDoc: ChannelDoc = {
-              channel_id: fields.channel_id?.stringValue || user.uid,
+              channel_id: existingChannel?.channel_id || fields.channel_id?.stringValue || user.uid,
               user_uid: user.uid,
               username: user.username,
               display_name: user.display_name || fields.display_name?.stringValue || user.username,
               photo_url: user.photo_url || fields.photo_url?.stringValue || null,
-              thumbnail_url: fields.thumbnail_url?.stringValue || null,
-              livepeer_stream_id: livepeerStreamId,
-              stream_key: streamKey,
-              playback_id: playbackId,
-              stream_title: fields.stream_title?.stringValue || `${user.display_name}'s Live Stream`,
-              category: fields.category?.stringValue || "music",
+              thumbnail_url: fields.thumbnail_url?.stringValue || existingChannel?.thumbnail_url || null,
+              livepeer_stream_id: livepeerStreamId || existingChannel?.livepeer_stream_id || "",
+              stream_key: streamKey || existingChannel?.stream_key || "",
+              playback_id: playbackId || existingChannel?.playback_id || "",
+              stream_title: fields.stream_title?.stringValue || existingChannel?.stream_title || `${user.display_name}'s Live Stream`,
+              category: fields.category?.stringValue || existingChannel?.category || "music",
               is_live: Boolean(fields.is_live?.booleanValue),
               viewer_count: Number(fields.viewer_count?.integerValue || 0),
               record_enabled: true,
@@ -994,7 +1239,7 @@ async function getOrRestoreUserChannel(user: UserDoc): Promise<ChannelDoc> {
     }
   }
 
-  // 4. Create new Livepeer stream ONLY if no channel exists in memory or Firestore
+  // 4. Create new Livepeer stream ONLY if no channel exists in memory or Firestore with stream key
   let livepeerStreamId = "";
   let streamKey = "";
   let playbackId = "";
@@ -1008,7 +1253,7 @@ async function getOrRestoreUserChannel(user: UserDoc): Promise<ChannelDoc> {
     console.error("Livepeer stream creation failed during new channel initialization:", e);
   }
 
-  const newChannel: ChannelDoc = {
+  const channelToSave: ChannelDoc = existingChannel || {
     channel_id: user.uid || crypto.randomUUID(),
     user_uid: user.uid,
     username: user.username,
@@ -1027,9 +1272,16 @@ async function getOrRestoreUserChannel(user: UserDoc): Promise<ChannelDoc> {
     created_at: new Date().toISOString(),
   };
 
-  db.channels.set(newChannel.channel_id, newChannel);
-  syncChannelToFirestore(newChannel).catch(() => {});
-  return newChannel;
+  if (existingChannel) {
+    channelToSave.livepeer_stream_id = livepeerStreamId || channelToSave.livepeer_stream_id || "";
+    channelToSave.stream_key = streamKey || channelToSave.stream_key || "";
+    channelToSave.playback_id = playbackId || channelToSave.playback_id || "";
+    channelToSave.last_updated = new Date().toISOString();
+  }
+
+  db.channels.set(channelToSave.channel_id, channelToSave);
+  await syncChannelToFirestore(channelToSave).catch(() => {});
+  return channelToSave;
 }
 
 async function requireAuth(req: Request, res: Response, next: NextFunction) {
@@ -1048,14 +1300,14 @@ async function requireAuth(req: Request, res: Response, next: NextFunction) {
 // Multer in-memory storage for uploads
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 8 * 1024 * 1024 },
+  limits: { fileSize: 50 * 1024 * 1024 },
 });
 
 async function startServer() {
   const app = express();
   // 1. Ensure express.json() middleware is loaded at the very top before any routes
-  app.use(express.json({ limit: "10mb", type: ["application/json", "application/*+json", "text/plain", "*/*"] }));
-  app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+  app.use(express.json({ limit: "50mb", type: ["application/json", "application/*+json", "text/plain"] }));
+  app.use(express.urlencoded({ extended: true, limit: "50mb" }));
   app.use(cors({ origin: "*" }));
 
   const api = express.Router();
@@ -1616,91 +1868,278 @@ async function startServer() {
   });
 
   // Users: Update profile
-  api.patch("/users/me", requireAuth, (req, res) => {
-    const user = (req as any).user as UserDoc;
-    const { display_name, bio, photo_url } = req.body || {};
-
-    if (display_name !== undefined) user.display_name = String(display_name);
-    if (bio !== undefined) user.bio = String(bio);
-    if (photo_url !== undefined) user.photo_url = photo_url;
-
-    // Sync to user's channel
-    for (const c of db.channels.values()) {
-      if (c.user_uid === user.uid) {
-        if (display_name !== undefined) c.display_name = user.display_name;
-        if (photo_url !== undefined) c.photo_url = user.photo_url;
-        c.last_updated = nowIso();
+  const handleProfileUpdate = async (req: Request, res: Response) => {
+    try {
+      const user = (req as any).user as UserDoc;
+      if (!user) {
+        return res.status(401).json({ error: "Unauthorized" });
       }
-    }
 
-    res.json(userPublic(user));
+      const body = req.body || {};
+      const displayName = body.display_name ?? body.displayName ?? body.name;
+      const bio = body.bio ?? body.biography ?? body.about;
+      const photoUrl = body.photo_url ?? body.photoUrl ?? body.avatar_url ?? body.avatarUrl ?? body.avatar ?? body.image_url ?? body.imageUrl;
+      const username = body.username ?? body.handle;
+
+      if (displayName !== undefined && displayName !== null) {
+        user.display_name = String(displayName).trim();
+      }
+      if (bio !== undefined && bio !== null) {
+        user.bio = String(bio).trim();
+      }
+      if (photoUrl !== undefined && photoUrl !== null) {
+        user.photo_url = String(photoUrl);
+      }
+      if (username !== undefined && username !== null && String(username).trim()) {
+        const cleanU = String(username).toLowerCase().trim().replace(/[^a-zA-Z0-9_]/g, "");
+        if (cleanU) user.username = cleanU;
+      }
+
+      // Sync to user's channels in memory store
+      let updatedChannel: ChannelDoc | null = null;
+      for (const c of db.channels.values()) {
+        if (c.user_uid === user.uid) {
+          if (displayName !== undefined && displayName !== null) c.display_name = user.display_name;
+          if (photoUrl !== undefined && photoUrl !== null) c.photo_url = user.photo_url;
+          c.last_updated = nowIso();
+          updatedChannel = c;
+        }
+      }
+
+      db.users.set(user.uid, user);
+
+      // Async Firestore persistence
+      syncUserToFirestore(user).catch((err) => console.warn("Firestore user sync error:", err));
+      if (updatedChannel) {
+        syncChannelToFirestore(updatedChannel).catch((err) => console.warn("Firestore channel sync error:", err));
+      }
+
+      return res.json(userPublic(user));
+    } catch (err: any) {
+      console.error("Error in handleProfileUpdate:", err);
+      return res.status(500).json({ error: err?.message || "Failed to save profile" });
+    }
+  };
+
+  const profileEndpoints = [
+    "/users/me",
+    "/user/me",
+    "/users/profile",
+    "/user/profile",
+    "/profile",
+  ];
+
+  profileEndpoints.forEach((ep) => {
+    api.get(ep, requireAuth, (req, res) => res.json(userPublic((req as any).user)));
+    api.patch(ep, requireAuth, handleProfileUpdate);
+    api.put(ep, requireAuth, handleProfileUpdate);
+    api.post(ep, requireAuth, handleProfileUpdate);
   });
 
-  // Upload user photo
-  api.post("/users/me/photo", requireAuth, upload.single("file"), (req, res) => {
-    const user = (req as any).user as UserDoc;
-    if (!req.file) {
-      return res.status(400).json({ error: "File must be an image" });
-    }
-    const ext = req.file.originalname.split(".").pop() || "png";
-    const filePath = `avatars/${user.uid}/${crypto.randomUUID()}.${ext}`;
+  // Upload user photo / avatar
+  const handleUserPhotoUpload = (req: Request, res: Response) => {
+    upload.any()(req, res, async (err: any) => {
+      if (err) {
+        console.error("Multer error during photo upload:", err);
+        return res.status(400).json({ error: err.message || "Failed to upload photo" });
+      }
+      try {
+        const user = (req as any).user as UserDoc;
+        let photoUrl = req.body?.photo_url || req.body?.imageUrl || req.body?.avatar_url || req.body?.url || "";
 
-    db.files.set(filePath, {
-      data: req.file.buffer,
-      mimeType: req.file.mimetype || "image/png",
+        const filesList = (req as any).files || (req.file ? [req.file] : []);
+        const photoFile = filesList.find((f: any) => f.fieldname === "file" || f.fieldname === "photo" || f.fieldname === "avatar" || f.fieldname === "image" || f.fieldname === "media") || filesList[0];
+
+        if (photoFile) {
+          const ext = photoFile.originalname ? photoFile.originalname.split(".").pop() : "png";
+          const filePath = `avatars/${user.uid}/${crypto.randomUUID()}.${ext}`;
+          saveUploadedFile(filePath, photoFile.buffer, photoFile.mimetype || "image/png");
+          photoUrl = `/api/files/${filePath}`;
+        }
+
+        if (!photoUrl && (req.body?.file || req.body?.photo || req.body?.avatar || req.body?.image)) {
+          const rawStr = String(req.body.file || req.body.photo || req.body.avatar || req.body.image);
+          if (rawStr.startsWith("data:")) {
+            const matches = rawStr.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+            if (matches && matches.length === 3) {
+              const mimeType = matches[1];
+              const base64Data = matches[2];
+              const buffer = Buffer.from(base64Data, "base64");
+              const ext = mimeType.split("/")[1] || "png";
+              const filePath = `avatars/${user.uid}/${crypto.randomUUID()}.${ext}`;
+              saveUploadedFile(filePath, buffer, mimeType);
+              photoUrl = `/api/files/${filePath}`;
+            } else {
+              photoUrl = rawStr;
+            }
+          } else {
+            photoUrl = rawStr;
+          }
+        }
+
+        if (!photoUrl) {
+          return res.status(400).json({ error: "Image file or photo_url is required" });
+        }
+
+        user.photo_url = photoUrl;
+        for (const c of db.channels.values()) {
+          if (c.user_uid === user.uid) {
+            c.photo_url = photoUrl;
+            syncChannelToFirestore(c).catch(() => {});
+          }
+        }
+        if (admin && admin.apps && admin.apps.length) {
+          admin.firestore().collection("users").doc(user.uid).set({ photo_url: photoUrl, avatar_url: photoUrl }, { merge: true }).catch(() => {});
+        }
+
+        return res.json({ photo_url: photoUrl, url: photoUrl, avatar_url: photoUrl, user: userPublic(user) });
+      } catch (uploadErr: any) {
+        console.error("Error uploading user photo:", uploadErr);
+        return res.status(500).json({ error: uploadErr?.message || "Upload photo failed" });
+      }
     });
+  };
 
-    const photoUrl = `/api/files/${filePath}`;
-    user.photo_url = photoUrl;
-
-    for (const c of db.channels.values()) {
-      if (c.user_uid === user.uid) {
-        c.photo_url = photoUrl;
-      }
-    }
-
-    res.json({ photo_url: photoUrl });
-  });
+  api.post("/users/me/photo", requireAuth, handleUserPhotoUpload);
+  api.post("/users/me/avatar", requireAuth, handleUserPhotoUpload);
+  api.post("/channels/mine/photo", requireAuth, handleUserPhotoUpload);
+  api.post("/channels/mine/avatar", requireAuth, handleUserPhotoUpload);
 
   // Upload channel thumbnail
-  api.post("/channels/mine/thumbnail", requireAuth, upload.single("file"), (req, res) => {
-    const user = (req as any).user as UserDoc;
-    if (!req.file) {
-      return res.status(400).json({ error: "File must be an image" });
-    }
-    let targetChannel: ChannelDoc | null = null;
-    for (const c of db.channels.values()) {
-      if (c.user_uid === user.uid) {
-        targetChannel = c;
-        break;
+  const handleThumbnailUpload = (req: Request, res: Response) => {
+    upload.any()(req, res, async (err: any) => {
+      if (err) {
+        console.error("Multer error during thumbnail upload:", err);
+        return res.status(400).json({ error: err.message || "Failed to upload thumbnail" });
       }
-    }
-    if (!targetChannel) {
-      return res.status(404).json({ error: "Channel not found" });
-    }
+      try {
+        const user = (req as any).user as UserDoc;
+        let targetChannel: ChannelDoc | null = null;
+        for (const c of db.channels.values()) {
+          if (c.user_uid === user.uid) {
+            targetChannel = c;
+            break;
+          }
+        }
+        if (!targetChannel) {
+          return res.status(404).json({ error: "Channel not found" });
+        }
 
-    const ext = req.file.originalname.split(".").pop() || "png";
-    const filePath = `thumbnails/${user.uid}/${crypto.randomUUID()}.${ext}`;
+        let thumbnailUrl = req.body?.thumbnail_url || req.body?.imageUrl || req.body?.image_url || req.body?.url || "";
+        const filesList = (req as any).files || (req.file ? [req.file] : []);
+        const thumbFile = filesList.find((f: any) => f.fieldname === "file" || f.fieldname === "thumbnail" || f.fieldname === "image") || filesList[0];
 
-    db.files.set(filePath, {
-      data: req.file.buffer,
-      mimeType: req.file.mimetype || "image/png",
+        if (thumbFile) {
+          const ext = thumbFile.originalname ? thumbFile.originalname.split(".").pop() : "png";
+          const filePath = `thumbnails/${user.uid}/${crypto.randomUUID()}.${ext}`;
+          saveUploadedFile(filePath, thumbFile.buffer, thumbFile.mimetype || "image/png");
+          thumbnailUrl = `/api/files/${filePath}`;
+        }
+
+        if (!thumbnailUrl && (req.body?.file || req.body?.thumbnail || req.body?.image)) {
+          const rawStr = String(req.body.file || req.body.thumbnail || req.body.image);
+          if (rawStr.startsWith("data:")) {
+            const matches = rawStr.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+            if (matches && matches.length === 3) {
+              const mimeType = matches[1];
+              const base64Data = matches[2];
+              const buffer = Buffer.from(base64Data, "base64");
+              const ext = mimeType.split("/")[1] || "png";
+              const filePath = `thumbnails/${user.uid}/${crypto.randomUUID()}.${ext}`;
+              saveUploadedFile(filePath, buffer, mimeType);
+              thumbnailUrl = `/api/files/${filePath}`;
+            } else {
+              thumbnailUrl = rawStr;
+            }
+          } else {
+            thumbnailUrl = rawStr;
+          }
+        }
+
+        if (!thumbnailUrl) {
+          return res.status(400).json({ error: "Image file or thumbnail_url is required" });
+        }
+
+        targetChannel.thumbnail_url = thumbnailUrl;
+        targetChannel.last_updated = nowIso();
+        db.channels.set(targetChannel.channel_id, targetChannel);
+        await syncChannelToFirestore(targetChannel).catch(() => {});
+
+        return res.json({ thumbnail_url: thumbnailUrl, url: thumbnailUrl });
+      } catch (uploadErr: any) {
+        console.error("Error uploading thumbnail:", uploadErr);
+        return res.status(500).json({ error: uploadErr?.message || "Failed to upload thumbnail" });
+      }
     });
+  };
 
-    const thumbnailUrl = `/api/files/${filePath}`;
-    targetChannel.thumbnail_url = thumbnailUrl;
-    targetChannel.last_updated = nowIso();
+  api.post("/channels/mine/thumbnail", requireAuth, handleThumbnailUpload);
 
-    res.json({ thumbnail_url: thumbnailUrl });
-  });
+  // Generic Asset Upload Endpoint
+  const handleGenericAssetUpload = (req: Request, res: Response) => {
+    upload.any()(req, res, async (err: any) => {
+      if (err) {
+        console.error("Multer error during asset upload:", err);
+        return res.status(400).json({ error: err.message || "Failed to upload asset" });
+      }
+      try {
+        const user = (req as any).user as UserDoc;
+        let assetUrl = req.body?.url || req.body?.image_url || req.body?.photo_url || "";
+
+        const filesList = (req as any).files || (req.file ? [req.file] : []);
+        const assetFile = filesList[0];
+
+        if (assetFile) {
+          const ext = assetFile.originalname ? assetFile.originalname.split(".").pop() : "png";
+          const filePath = `assets/${user?.uid || "guest"}/${crypto.randomUUID()}.${ext}`;
+          saveUploadedFile(filePath, assetFile.buffer, assetFile.mimetype || "image/png");
+          assetUrl = `/api/files/${filePath}`;
+        }
+
+        if (!assetUrl && (req.body?.file || req.body?.image || req.body?.media)) {
+          const rawStr = String(req.body.file || req.body.image || req.body.media);
+          if (rawStr.startsWith("data:")) {
+            const matches = rawStr.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+            if (matches && matches.length === 3) {
+              const mimeType = matches[1];
+              const base64Data = matches[2];
+              const buffer = Buffer.from(base64Data, "base64");
+              const ext = mimeType.split("/")[1] || "png";
+              const filePath = `assets/${user?.uid || "guest"}/${crypto.randomUUID()}.${ext}`;
+              saveUploadedFile(filePath, buffer, mimeType);
+              assetUrl = `/api/files/${filePath}`;
+            } else {
+              assetUrl = rawStr;
+            }
+          } else {
+            assetUrl = rawStr;
+          }
+        }
+
+        if (!assetUrl) {
+          return res.status(400).json({ error: "File or url is required" });
+        }
+
+        return res.json({ url: assetUrl, photo_url: assetUrl, thumbnail_url: assetUrl, image_url: assetUrl });
+      } catch (uploadErr: any) {
+        console.error("Error uploading asset:", uploadErr);
+        return res.status(500).json({ error: uploadErr?.message || "Upload asset failed" });
+      }
+    });
+  };
+
+  api.post("/assets/upload", requireAuth, handleGenericAssetUpload);
+  api.post("/upload", requireAuth, handleGenericAssetUpload);
 
   // Delete channel thumbnail
-  api.delete("/channels/mine/thumbnail", requireAuth, (req, res) => {
+  api.delete("/channels/mine/thumbnail", requireAuth, async (req, res) => {
     const user = (req as any).user as UserDoc;
     for (const c of db.channels.values()) {
       if (c.user_uid === user.uid) {
         c.thumbnail_url = null;
         c.last_updated = nowIso();
+        db.channels.set(c.channel_id, c);
+        await syncChannelToFirestore(c).catch(() => {});
       }
     }
     res.json({ thumbnail_url: null });
@@ -1747,35 +2186,96 @@ async function startServer() {
       const user = (req as any).user as UserDoc;
       const { stream_title, category, schedule, stream_key, playback_id, livepeer_stream_id } = req.body || {};
 
-      if (category && !CATEGORIES.includes(category)) {
-        return res.status(400).json({ error: "Invalid category" });
-      }
-
       const myChannel = await getOrRestoreUserChannel(user);
 
       if (stream_title !== undefined) myChannel.stream_title = String(stream_title);
-      if (category !== undefined) myChannel.category = String(category);
-      if (stream_key !== undefined && String(stream_key).trim()) myChannel.stream_key = String(stream_key);
-      if (playback_id !== undefined && String(playback_id).trim()) myChannel.playback_id = String(playback_id);
-      if (livepeer_stream_id !== undefined && String(livepeer_stream_id).trim()) myChannel.livepeer_stream_id = String(livepeer_stream_id);
-      if (Array.isArray(schedule)) {
-        myChannel.schedule = schedule.map((item: any) => ({
-          id: String(item.id || crypto.randomUUID()),
-          day: String(item.day || "FRI"),
-          time: String(item.time || "20:00 - 22:00"),
-          title: String(item.title || "Live Set"),
-          genre: item.genre ? String(item.genre) : undefined,
+      if (category !== undefined && String(category).trim()) {
+        const catClean = String(category).toLowerCase().trim();
+        const matched = CATEGORIES.find((c) => c.toLowerCase() === catClean);
+        myChannel.category = matched || catClean;
+      }
+      if (stream_key !== undefined && String(stream_key).trim()) myChannel.stream_key = String(stream_key).trim();
+      if (playback_id !== undefined && String(playback_id).trim()) myChannel.playback_id = String(playback_id).trim();
+      if (livepeer_stream_id !== undefined && String(livepeer_stream_id).trim()) myChannel.livepeer_stream_id = String(livepeer_stream_id).trim();
+      if (req.body?.thumbnail_url !== undefined) myChannel.thumbnail_url = req.body.thumbnail_url ? String(req.body.thumbnail_url) : null;
+      let rawSchedule = schedule !== undefined ? schedule : req.body?.schedule_json;
+      if (typeof rawSchedule === "string") {
+        try {
+          rawSchedule = JSON.parse(rawSchedule);
+        } catch (e) {}
+      }
+
+      if (Array.isArray(rawSchedule)) {
+        myChannel.schedule = rawSchedule.map((item: any) => ({
+          id: String(item?.id || crypto.randomUUID()),
+          day: String(item?.day || "FRI"),
+          time: String(item?.time || "20:00 - 22:00"),
+          title: String(item?.title || "Live Set"),
+          genre: item?.genre ? String(item.genre) : undefined,
         }));
       }
       myChannel.last_updated = nowIso();
 
+      db.channels.set(myChannel.channel_id, myChannel);
       syncChannelToFirestore(myChannel).catch(() => {});
+
       return res.json(channelPublic(myChannel, { include_stream_key: true }));
     } catch (err: any) {
       console.error("Error in PATCH /channels/mine:", err);
       return res.status(500).json({ error: "Failed to update channel" });
     }
   });
+
+  // Dedicated Schedule API routes
+  api.get("/channels/mine/schedule", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user as UserDoc;
+      const myChannel = await getOrRestoreUserChannel(user);
+      return res.json({ schedule: myChannel.schedule || [] });
+    } catch (err: any) {
+      console.error("Error in GET /channels/mine/schedule:", err);
+      return res.status(500).json({ error: "Failed to fetch schedule" });
+    }
+  });
+
+  const saveScheduleHandler = async (req: Request, res: Response) => {
+    try {
+      const user = (req as any).user as UserDoc;
+      const myChannel = await getOrRestoreUserChannel(user);
+      let rawSchedule = req.body?.schedule !== undefined ? req.body.schedule : (req.body?.schedule_json !== undefined ? req.body.schedule_json : req.body);
+
+      if (typeof rawSchedule === "string") {
+        try {
+          rawSchedule = JSON.parse(rawSchedule);
+        } catch (e) {}
+      }
+
+      if (Array.isArray(rawSchedule)) {
+        myChannel.schedule = rawSchedule.map((item: any) => ({
+          id: String(item?.id || crypto.randomUUID()),
+          day: String(item?.day || "FRI"),
+          time: String(item?.time || "20:00 - 22:00"),
+          title: String(item?.title || "Live Set"),
+          genre: item?.genre ? String(item.genre) : undefined,
+        }));
+      } else {
+        return res.status(400).json({ error: "Schedule must be an array of schedule slots" });
+      }
+
+      myChannel.last_updated = nowIso();
+      db.channels.set(myChannel.channel_id, myChannel);
+      syncChannelToFirestore(myChannel).catch(() => {});
+
+      return res.json(channelPublic(myChannel, { include_stream_key: true }));
+    } catch (err: any) {
+      console.error("Error in save schedule handler:", err);
+      return res.status(500).json({ error: "Failed to save schedule" });
+    }
+  };
+
+  api.post("/channels/mine/schedule", requireAuth, saveScheduleHandler);
+  api.put("/channels/mine/schedule", requireAuth, saveScheduleHandler);
+  api.patch("/channels/mine/schedule", requireAuth, saveScheduleHandler);
 
   // Go live / Toggle live
   api.post("/channels/mine/go-live", requireAuth, (req, res) => {
@@ -2180,48 +2680,86 @@ async function startServer() {
     res.json({ emotes: list });
   });
 
-  api.post("/channels/mine/emotes", requireAuth, upload.single("file"), (req, res) => {
-    const user = (req as any).user as UserDoc;
-    let imageUrl = req.body?.image_url || "";
-
-    if (req.file) {
-      const ext = req.file.originalname.split(".").pop() || "png";
-      const filePath = `emotes/${user.uid}/${crypto.randomUUID()}.${ext}`;
-      db.files.set(filePath, {
-        data: req.file.buffer,
-        mimeType: req.file.mimetype || "image/png",
-      });
-      imageUrl = `/api/files/${filePath}`;
-    }
-
-    if (!imageUrl) {
-      return res.status(400).json({ error: "Image file or image_url required" });
-    }
-
-    let rawCode = (req.body?.code || "custom").trim().replace(/[^a-zA-Z0-9_]/g, "");
-    if (!rawCode) rawCode = "emote";
-    const code = `:${rawCode}:`;
-    const name = (req.body?.name || rawCode).trim();
-
-    let channelUsername = user.username;
-    for (const c of db.channels.values()) {
-      if (c.user_uid === user.uid) {
-        channelUsername = c.username;
-        break;
+  api.post("/channels/mine/emotes", requireAuth, (req, res) => {
+    upload.any()(req, res, async (err: any) => {
+      if (err) {
+        console.error("Multer error during emote upload:", err);
+        if (err instanceof multer.MulterError) {
+          if (err.code === "LIMIT_FILE_SIZE") {
+            return res.status(400).json({ error: "File size exceeds limit" });
+          }
+          return res.status(400).json({ error: `File upload error: ${err.message}` });
+        }
+        return res.status(400).json({ error: err.message || "Failed to upload emote" });
       }
-    }
 
-    const emoteDoc: EmoteDoc = {
-      id: `e-${crypto.randomUUID()}`,
-      channel_username: channelUsername.toLowerCase(),
-      code,
-      name,
-      image_url: imageUrl,
-      created_at: nowIso(),
-    };
+      try {
+        const user = (req as any).user as UserDoc;
+        let imageUrl = req.body?.image_url || req.body?.imageUrl || "";
 
-    db.emotes.push(emoteDoc);
-    res.json({ emote: emoteDoc });
+        const filesList = (req as any).files || (req.file ? [req.file] : []);
+        const emoteFile = filesList.find((f: any) => f.fieldname === "file" || f.fieldname === "image" || f.fieldname === "media") || filesList[0];
+
+        if (emoteFile) {
+          const ext = emoteFile.originalname ? emoteFile.originalname.split(".").pop() : "png";
+          const filePath = `emotes/${user.uid}/${crypto.randomUUID()}.${ext}`;
+          saveUploadedFile(filePath, emoteFile.buffer, emoteFile.mimetype || "image/png");
+          imageUrl = `/api/files/${filePath}`;
+        }
+
+        if (!imageUrl && (req.body?.file || req.body?.image || req.body?.media)) {
+          const rawStr = String(req.body.file || req.body.image || req.body.media);
+          if (rawStr.startsWith("data:")) {
+            const matches = rawStr.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+            if (matches && matches.length === 3) {
+              const mimeType = matches[1];
+              const base64Data = matches[2];
+              const buffer = Buffer.from(base64Data, "base64");
+              const ext = mimeType.split("/")[1] || "png";
+              const filePath = `emotes/${user.uid}/${crypto.randomUUID()}.${ext}`;
+              saveUploadedFile(filePath, buffer, mimeType);
+              imageUrl = `/api/files/${filePath}`;
+            } else {
+              imageUrl = rawStr;
+            }
+          } else {
+            imageUrl = rawStr;
+          }
+        }
+
+        if (!imageUrl) {
+          return res.status(400).json({ error: "Image file or image_url required" });
+        }
+
+        let rawCode = (req.body?.code || "custom").trim().replace(/[^a-zA-Z0-9_]/g, "");
+        if (!rawCode) rawCode = "emote";
+        const code = `:${rawCode}:`;
+        const name = (req.body?.name || rawCode).trim();
+
+        let channelUsername = user.username;
+        for (const c of db.channels.values()) {
+          if (c.user_uid === user.uid) {
+            channelUsername = c.username;
+            break;
+          }
+        }
+
+        const emoteDoc: EmoteDoc = {
+          id: `e-${crypto.randomUUID()}`,
+          channel_username: channelUsername.toLowerCase(),
+          code,
+          name,
+          image_url: imageUrl,
+          created_at: nowIso(),
+        };
+
+        db.emotes.push(emoteDoc);
+        return res.json({ emote: emoteDoc });
+      } catch (uploadErr: any) {
+        console.error("Error creating emote:", uploadErr);
+        return res.status(500).json({ error: uploadErr?.message || "Failed to upload emote" });
+      }
+    });
   });
 
   api.delete("/channels/mine/emotes/:id", requireAuth, (req, res) => {
@@ -2252,7 +2790,8 @@ async function startServer() {
     });
   };
 
-  api.get("/stories", (req, res) => {
+  api.get("/stories", async (req, res) => {
+    await restoreStoriesFromFirestore().catch(() => {});
     purgeExpiredStories();
     const nowTime = Date.now();
     const valid = db.stories
@@ -2270,57 +2809,102 @@ async function startServer() {
     res.json(valid);
   });
 
-  api.post("/stories", requireAuth, upload.single("media"), (req, res) => {
-    const user = (req as any).user as UserDoc;
-    let mediaUrl = req.body?.media_url || "";
-    let mediaType: "image" | "video" = req.body?.media_type === "video" ? "video" : "image";
+  api.post("/stories", requireAuth, (req, res) => {
+    upload.any()(req, res, async (err: any) => {
+      if (err) {
+        console.error("Multer error during story upload:", err);
+        if (err instanceof multer.MulterError) {
+          if (err.code === "LIMIT_FILE_SIZE") {
+            return res.status(400).json({ error: "File size exceeds 50MB limit" });
+          }
+          return res.status(400).json({ error: `File upload error: ${err.message}` });
+        }
+        return res.status(400).json({ error: err.message || "Failed to upload story file" });
+      }
 
-    if (req.file) {
-      const isVideo = req.file.mimetype.startsWith("video/");
-      mediaType = isVideo ? "video" : "image";
-      const ext = req.file.originalname.split(".").pop() || (isVideo ? "mp4" : "png");
-      const filePath = `stories/${user.uid}/${crypto.randomUUID()}.${ext}`;
-      db.files.set(filePath, {
-        data: req.file.buffer,
-        mimeType: req.file.mimetype || (isVideo ? "video/mp4" : "image/png"),
-      });
-      mediaUrl = `/api/files/${filePath}`;
-    }
+      try {
+        const user = (req as any).user as UserDoc;
+        let mediaUrl = req.body?.media_url || "";
+        let mediaType: "image" | "video" = req.body?.media_type === "video" ? "video" : "image";
 
-    if (!mediaUrl) {
-      return res.status(400).json({ error: "Photo or video media file is required" });
-    }
+        // Check req.files array (from upload.any()) or req.file
+        const filesList = (req as any).files || (req.file ? [req.file] : []);
+        const mediaFile = filesList.find((f: any) => f.fieldname === "media" || f.fieldname === "file") || filesList[0];
 
-    const caption = (req.body?.caption || "").trim();
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
+        if (mediaFile) {
+          const isVideo = mediaFile.mimetype ? mediaFile.mimetype.startsWith("video/") : false;
+          mediaType = isVideo ? "video" : "image";
+          const ext = (mediaFile.originalname || "").split(".").pop() || (isVideo ? "mp4" : "png");
+          const filePath = `stories/${user.uid}/${crypto.randomUUID()}.${ext}`;
+          saveUploadedFile(filePath, mediaFile.buffer, mediaFile.mimetype || (isVideo ? "video/mp4" : "image/png"));
+          mediaUrl = `/api/files/${filePath}`;
+        }
 
-    const story: StoryDoc = {
-      id: `story-${crypto.randomUUID()}`,
-      user_uid: user.uid,
-      username: user.username,
-      display_name: user.display_name || user.username,
-      user_photo_url: user.photo_url || null,
-      media_url: mediaUrl,
-      media_type: mediaType,
-      caption,
-      created_at: now.toISOString(),
-      expires_at: expiresAt,
-    };
+        // Support base64 data URL fallback
+        if (!mediaUrl && (req.body?.media || req.body?.media_url || req.body?.file)) {
+          const rawStr = String(req.body.media || req.body.media_url || req.body.file);
+          if (rawStr.startsWith("data:")) {
+            const matches = rawStr.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+            if (matches && matches.length === 3) {
+              const mimeType = matches[1];
+              const base64Data = matches[2];
+              const buffer = Buffer.from(base64Data, "base64");
+              const isVideo = mimeType.startsWith("video/");
+              mediaType = isVideo ? "video" : "image";
+              const ext = mimeType.split("/")[1] || (isVideo ? "mp4" : "png");
+              const filePath = `stories/${user.uid}/${crypto.randomUUID()}.${ext}`;
+              saveUploadedFile(filePath, buffer, mimeType);
+              mediaUrl = `/api/files/${filePath}`;
+            } else {
+              mediaUrl = rawStr;
+            }
+          } else {
+            mediaUrl = rawStr;
+          }
+        }
 
-    db.stories.unshift(story);
-    res.json({
-      ...story,
-      time_left_sec: 24 * 3600,
+        if (!mediaUrl) {
+          return res.status(400).json({ error: "Photo or video media file is required" });
+        }
+
+        const caption = (req.body?.caption || "").trim();
+        const now = new Date();
+        const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
+
+        const story: StoryDoc = {
+          id: `story-${crypto.randomUUID()}`,
+          user_uid: user.uid,
+          username: user.username,
+          display_name: user.display_name || user.username,
+          user_photo_url: user.photo_url || null,
+          media_url: mediaUrl,
+          media_type: mediaType,
+          caption,
+          created_at: now.toISOString(),
+          expires_at: expiresAt,
+        };
+
+        db.stories.unshift(story);
+        syncStoryToFirestore(story).catch(() => {});
+
+        return res.json({
+          ...story,
+          time_left_sec: 24 * 3600,
+        });
+      } catch (uploadErr: any) {
+        console.error("Error creating story:", uploadErr);
+        return res.status(500).json({ error: uploadErr?.message || "Failed to create story" });
+      }
     });
   });
 
-  api.delete("/stories/:id", requireAuth, (req, res) => {
+  api.delete("/stories/:id", requireAuth, async (req, res) => {
     const user = (req as any).user as UserDoc;
     const storyId = req.params.id;
 
     const idx = db.stories.findIndex((s) => s.id === storyId);
     if (idx === -1) {
+      deleteStoryFromFirestore(storyId).catch(() => {});
       return res.status(404).json({ error: "Story not found or expired" });
     }
 
@@ -2330,6 +2914,7 @@ async function startServer() {
     }
 
     db.stories.splice(idx, 1);
+    deleteStoryFromFirestore(storyId).catch(() => {});
     res.json({ ok: true, deleted_id: storyId });
   });
 
@@ -2341,21 +2926,33 @@ async function startServer() {
     res.json({ watts: user.watts ?? 250, uid: user.uid, username: user.username });
   });
 
-  api.post("/channels/:username/watts/ping", requireAuth, (req, res) => {
-    const user = (req as any).user as UserDoc;
-    const uname = req.params.username.toLowerCase();
-    const now = Date.now();
-    const key = `${user.uid}:${uname}`;
-    const last = lastWattsPing.get(key) || 0;
-
-    let accrued = 0;
-    if (now - last >= 8000) {
-      accrued = 15;
-      user.watts = (user.watts ?? 250) + accrued;
-      lastWattsPing.set(key, now);
+  api.post("/channels/:username/watts/ping", (req, res) => {
+    let user: UserDoc | null = null;
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      try {
+        const payload = jwt.verify(authHeader.substring(7), JWT_SECRET) as { sub: string };
+        user = db.users.get(payload.sub) || null;
+      } catch {}
     }
 
-    res.json({ watts: user.watts ?? 250, accrued });
+    if (user) {
+      const uname = req.params.username.toLowerCase();
+      const now = Date.now();
+      const key = `${user.uid}:${uname}`;
+      const last = lastWattsPing.get(key) || 0;
+
+      let accrued = 0;
+      if (now - last >= 8000) {
+        accrued = 15;
+        user.watts = (user.watts ?? 250) + accrued;
+        lastWattsPing.set(key, now);
+      }
+
+      return res.json({ watts: user.watts ?? 250, accrued });
+    }
+
+    return res.json({ watts: 250, accrued: 15 });
   });
 
   api.post("/channels/:username/watts/spend", requireAuth, (req, res) => {
@@ -2380,6 +2977,78 @@ async function startServer() {
       .slice(-limit);
 
     res.json(msgs);
+  });
+
+  // Post chat message (REST endpoint for signed in & guest users)
+  api.post("/channels/:username/messages", async (req, res) => {
+    const uname = req.params.username.toLowerCase();
+    let user: UserDoc | null = await authenticateToken(req);
+
+    if (!user) {
+      const guestName = req.body?.guest_name || req.body?.sender_display_name;
+      const guestNum = Math.floor(1000 + Math.random() * 9000);
+      const guestId = `guest_${crypto.randomBytes(4).toString("hex")}`;
+      const name = guestName ? String(guestName).trim().slice(0, 24) : `Guest ${guestNum}`;
+      user = {
+        uid: guestId,
+        email: `${guestId}@guest.local`,
+        username: name.toLowerCase().replace(/[^a-z0-9_]/g, "") || `guest_${guestNum}`,
+        display_name: name,
+        photo_url: null,
+        bio: "Guest Chatter",
+        password_hash: "",
+        created_at: nowIso(),
+        watts: 250,
+      };
+    }
+
+    const text = String(req.body?.text || "").trim();
+    if (!text || text.length > 500) {
+      return res.status(400).json({ error: "Message text is required (max 500 chars)" });
+    }
+
+    const isHighlighted = Boolean(req.body?.is_highlighted);
+    const highlightType = req.body?.highlight_type || "neon_glow";
+
+    const senderBadges: string[] = [];
+    let senderColor = "#e5ff00";
+
+    if (user.uid.startsWith("guest_")) {
+      senderBadges.push("guest");
+      senderColor = "#a1a1aa";
+    }
+
+    const msgDoc: ChatMessageDoc = {
+      id: crypto.randomUUID(),
+      channel_username: uname,
+      text,
+      sender_uid: user.uid,
+      sender_username: user.username,
+      sender_display_name: user.display_name,
+      sender_photo_url: user.photo_url,
+      created_at: nowIso(),
+      is_highlighted: isHighlighted,
+      highlight_type: isHighlighted ? highlightType : undefined,
+      sender_badges: senderBadges,
+      sender_color: senderColor,
+    };
+
+    db.chatMessages.push(msgDoc);
+
+    const room = wsRooms.get(uname);
+    if (room) {
+      const payload = JSON.stringify({
+        type: "message",
+        ...msgDoc,
+      });
+      room.forEach((client) => {
+        if (client.readyState === 1) {
+          client.send(payload);
+        }
+      });
+    }
+
+    return res.json({ success: true, message: msgDoc });
   });
 
   // Recording sessions
@@ -2408,8 +3077,9 @@ async function startServer() {
 
   // Serve static uploaded files
   api.get("/files/*", (req, res) => {
-    const fileKey = req.params[0];
-    const file = db.files.get(fileKey);
+    const rawPath = req.path.replace(/^\/files\//, "");
+    const fileKey = decodeURIComponent(rawPath);
+    const file = getUploadedFile(fileKey) || db.files.get(fileKey) || (req.params[0] ? getUploadedFile(req.params[0]) : null);
     if (!file) {
       return res.status(404).send("File not found");
     }
@@ -2455,31 +3125,26 @@ async function startServer() {
     }
   });
 
-  wss.on("connection", (ws: WebSocket, request: http.IncomingMessage) => {
+  wss.on("connection", async (ws: WebSocket, request: http.IncomingMessage) => {
     const url = new URL(request.url || "", `http://${request.headers.host}`);
     const channelUsername = decodeURIComponent(
       url.pathname.replace("/api/ws/chat/", "")
     ).toLowerCase();
     const token = url.searchParams.get("token");
 
-    let user: UserDoc | null = null;
-    if (token && token !== "guest" && token !== "null" && token !== "undefined") {
-      try {
-        const payload = jwt.verify(token, JWT_SECRET) as { sub: string };
-        user = db.users.get(payload.sub) || null;
-      } catch {
-        // Invalid token, fall through to guest user creation
-      }
-    }
+    let user: UserDoc | null = await findUserByToken(token);
+
+    const guestNameParam = url.searchParams.get("guest_name");
 
     if (!user) {
       const guestNum = Math.floor(1000 + Math.random() * 9000);
       const guestId = `guest_${crypto.randomBytes(4).toString("hex")}`;
+      const name = guestNameParam ? guestNameParam.trim().slice(0, 24) : `Guest ${guestNum}`;
       user = {
         uid: guestId,
         email: `${guestId}@guest.local`,
-        username: `guest_${guestNum}`,
-        display_name: `Guest ${guestNum}`,
+        username: name.toLowerCase().replace(/[^a-z0-9_]/g, "") || `guest_${guestNum}`,
+        display_name: name,
         photo_url: null,
         bio: "Guest Chatter",
         password_hash: "",
@@ -2511,14 +3176,37 @@ async function startServer() {
       let text = "";
       let isHighlighted = false;
       let highlightType = "neon_glow";
+      let msgType = "message";
+      let isTyping = false;
 
       try {
         const parsed = JSON.parse(raw.toString("utf-8"));
-        text = (parsed.text || "").trim();
-        isHighlighted = !!parsed.is_highlighted;
-        if (parsed.highlight_type) highlightType = parsed.highlight_type;
+        if (parsed.type === "typing") {
+          msgType = "typing";
+          isTyping = parsed.is_typing !== false;
+        } else {
+          text = (parsed.text || "").trim();
+          isHighlighted = !!parsed.is_highlighted;
+          if (parsed.highlight_type) highlightType = parsed.highlight_type;
+        }
       } catch {
         text = raw.toString("utf-8").trim();
+      }
+
+      if (msgType === "typing") {
+        const typingPayload = JSON.stringify({
+          type: "typing",
+          uid: user!.uid,
+          username: user!.username,
+          display_name: user!.display_name,
+          is_typing: isTyping,
+        });
+        for (const clientSocket of room) {
+          if (clientSocket !== ws && clientSocket.readyState === WebSocket.OPEN) {
+            clientSocket.send(typingPayload);
+          }
+        }
+        return;
       }
 
       if (!text || text.length > 500) return;
@@ -2535,6 +3223,11 @@ async function startServer() {
       // Compute Badges
       const senderBadges: string[] = [];
       let senderColor = "#e5ff00";
+
+      if (user!.uid.startsWith("guest_")) {
+        senderBadges.push("guest");
+        senderColor = "#a1a1aa";
+      }
 
       const isBroadcaster = user!.username.toLowerCase() === channelUsername.toLowerCase();
       if (isBroadcaster) {

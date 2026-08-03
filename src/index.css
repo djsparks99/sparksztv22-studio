@@ -4,7 +4,6 @@
 
 @layer base {
   :root {
-    --ticker-height: 37px;
   }
 
   html, body {

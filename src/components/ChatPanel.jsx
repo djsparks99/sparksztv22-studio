@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { getToken, fileUrl, BACKEND, api } from "@/lib/api";
+import { getToken, setToken, fileUrl, BACKEND, api } from "@/lib/api";
+import { auth } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import { Send, LogIn, User, Smile, Zap, Crown, Shield, Gem, Sparkles, X, Flame } from "lucide-react";
 import { Link } from "react-router-dom";
 
-function wsUrl(username, token) {
+function wsUrl(username, token, guestName = "") {
   const httpUrl = BACKEND || window.location.origin;
   const wsBase = httpUrl.replace(/^http/i, "ws");
-  return `${wsBase}/api/ws/chat/${encodeURIComponent(username)}?token=${encodeURIComponent(token)}`;
+  const query = `token=${encodeURIComponent(token)}${guestName ? `&guest_name=${encodeURIComponent(guestName)}` : ""}`;
+  return `${wsBase}/api/ws/chat/${encodeURIComponent(username)}?${query}`;
 }
 
 export default function ChatPanel({ username }) {
@@ -16,6 +18,13 @@ export default function ChatPanel({ username }) {
   const [text, setText] = useState("");
   const [connected, setConnected] = useState(false);
   const [systemLine, setSystemLine] = useState(null);
+  
+  // Guest Name State (for guests chatting without an account)
+  const [guestName, setGuestName] = useState(() => {
+    return localStorage.getItem("sparkz_guest_name") || "";
+  });
+  const [isEditingGuestName, setIsEditingGuestName] = useState(false);
+  const [tempGuestName, setTempGuestName] = useState(guestName);
   
   // Watts state
   const [watts, setWatts] = useState(250);
@@ -27,6 +36,11 @@ export default function ChatPanel({ username }) {
   const [showEmotePicker, setShowEmotePicker] = useState(false);
   const [emoteTab, setEmoteTab] = useState("all"); // "all", "channel", "global"
   const [emoteSearch, setEmoteSearch] = useState("");
+
+  // Typing state
+  const [typingUsers, setTypingUsers] = useState({});
+  const lastTypingSentRef = useRef(0);
+  const typingTimerRef = useRef(null);
 
   const wsRef = useRef(null);
   const scrollRef = useRef(null);
@@ -75,6 +89,17 @@ export default function ChatPanel({ username }) {
     };
   }, [username, user]);
 
+  // Save guest name
+  const saveGuestName = (e) => {
+    e?.preventDefault();
+    const clean = tempGuestName.trim().slice(0, 24);
+    if (clean) {
+      setGuestName(clean);
+      localStorage.setItem("sparkz_guest_name", clean);
+    }
+    setIsEditingGuestName(false);
+  };
+
   // Watts Time-based Accrual Heartbeat (ping every 10 seconds while connected/watching)
   useEffect(() => {
     if (!connected) return;
@@ -105,49 +130,109 @@ export default function ChatPanel({ username }) {
 
   // Connect to WebSocket chat room
   useEffect(() => {
-    const token = getToken() || "guest";
-    const ws = new WebSocket(wsUrl(username, token));
-    wsRef.current = ws;
-    ws.onopen = () => setConnected(true);
-    ws.onclose = () => setConnected(false);
-    ws.onerror = () => setConnected(false);
-    ws.onmessage = (ev) => {
-      try {
-        const data = JSON.parse(ev.data);
-        if (data.type === "message") {
-          setMessages((prev) => [
-            ...(Array.isArray(prev) ? prev : []),
-            {
-              id: data.id,
-              text: data.text,
-              sender_uid: data.sender_uid,
-              sender_username: data.sender_username,
-              sender_display_name: data.sender_display_name,
-              sender_photo_url: data.sender_photo_url,
-              created_at: data.created_at,
-              is_highlighted: data.is_highlighted,
-              highlight_type: data.highlight_type,
-              sender_badges: data.sender_badges,
-              sender_color: data.sender_color,
-            },
-          ]);
+    let active = true;
 
-          if (typeof data.user_watts === "number" && user && data.sender_uid === user.uid) {
-            setWatts(data.user_watts);
-          }
-        } else if (data.type === "system") {
-          setSystemLine(data.message);
-          setTimeout(() => setSystemLine(null), 6000);
+    const connect = async () => {
+      let token = getToken();
+      if (!token && user && auth?.currentUser) {
+        try {
+          token = await auth.currentUser.getIdToken();
+          if (token) setToken(token);
+        } catch {
+          // ignore
         }
-      } catch {
-        // ignore malformed frames
+      }
+      token = token || "guest";
+      if (!active) return;
+
+      const ws = new WebSocket(wsUrl(username, token, !user ? guestName : ""));
+      wsRef.current = ws;
+      ws.onopen = () => active && setConnected(true);
+      ws.onclose = () => active && setConnected(false);
+      ws.onerror = () => active && setConnected(false);
+      ws.onmessage = (ev) => {
+        if (!active) return;
+        try {
+          const data = JSON.parse(ev.data);
+          if (data.type === "message") {
+            setMessages((prev) => [
+              ...(Array.isArray(prev) ? prev : []),
+              {
+                id: data.id,
+                text: data.text,
+                sender_uid: data.sender_uid,
+                sender_username: data.sender_username,
+                sender_display_name: data.sender_display_name,
+                sender_photo_url: data.sender_photo_url,
+                created_at: data.created_at,
+                is_highlighted: data.is_highlighted,
+                highlight_type: data.highlight_type,
+                sender_badges: data.sender_badges,
+                sender_color: data.sender_color,
+              },
+            ]);
+
+            // Clear typing status for sender
+            if (data.sender_uid) {
+              setTypingUsers((prev) => {
+                if (!prev[data.sender_uid]) return prev;
+                const next = { ...prev };
+                if (next[data.sender_uid]?.timeout) clearTimeout(next[data.sender_uid].timeout);
+                delete next[data.sender_uid];
+                return next;
+              });
+            }
+
+            if (typeof data.user_watts === "number" && user && data.sender_uid === user.uid) {
+              setWatts(data.user_watts);
+            }
+          } else if (data.type === "typing") {
+            if (data.is_typing) {
+              setTypingUsers((prev) => {
+                const next = { ...prev };
+                if (next[data.uid]?.timeout) clearTimeout(next[data.uid].timeout);
+                const timeout = setTimeout(() => {
+                  setTypingUsers((current) => {
+                    const copy = { ...current };
+                    delete copy[data.uid];
+                    return copy;
+                  });
+                }, 3500);
+                next[data.uid] = {
+                  username: data.username,
+                  displayName: data.display_name || data.username,
+                  timeout,
+                };
+                return next;
+              });
+            } else {
+              setTypingUsers((prev) => {
+                const next = { ...prev };
+                if (next[data.uid]?.timeout) clearTimeout(next[data.uid].timeout);
+                delete next[data.uid];
+                return next;
+              });
+            }
+          } else if (data.type === "system") {
+            setSystemLine(data.message);
+            setTimeout(() => setSystemLine(null), 6000);
+          }
+        } catch {
+          // ignore malformed frames
+        }
+      };
+    };
+
+    connect();
+
+    return () => {
+      active = false;
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
       }
     };
-    return () => {
-      ws.close();
-      wsRef.current = null;
-    };
-  }, [username, user]);
+  }, [username, user, guestName]);
 
   // Auto-scroll chat to bottom
   useEffect(() => {
@@ -156,10 +241,42 @@ export default function ChatPanel({ username }) {
     }
   }, [messages, systemLine]);
 
+  const handleInputChange = (e) => {
+    const val = e.target.value;
+    setText(val);
+
+    if (wsRef.current && wsRef.current.readyState === 1) {
+      const now = Date.now();
+      if (val.trim().length > 0) {
+        if (now - lastTypingSentRef.current > 2000) {
+          wsRef.current.send(JSON.stringify({ type: "typing", is_typing: true }));
+          lastTypingSentRef.current = now;
+        }
+
+        if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+        typingTimerRef.current = setTimeout(() => {
+          if (wsRef.current && wsRef.current.readyState === 1) {
+            wsRef.current.send(JSON.stringify({ type: "typing", is_typing: false }));
+          }
+          lastTypingSentRef.current = 0;
+        }, 2500);
+      } else {
+        if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+        wsRef.current.send(JSON.stringify({ type: "typing", is_typing: false }));
+        lastTypingSentRef.current = 0;
+      }
+    }
+  };
+
   const send = (e) => {
     e.preventDefault();
     const t = text.trim();
     if (!t || !wsRef.current || wsRef.current.readyState !== 1) return;
+
+    // Clear typing indicator on send
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+    wsRef.current.send(JSON.stringify({ type: "typing", is_typing: false }));
+    lastTypingSentRef.current = 0;
 
     wsRef.current.send(
       JSON.stringify({
@@ -349,10 +466,32 @@ export default function ChatPanel({ username }) {
         </div>
       )}
 
+      {/* Typing Indicator Bar */}
+      {Object.keys(typingUsers).length > 0 && (
+        <div
+          className="px-3 py-1 bg-[#0d0d10] border-t border-[#27272a] text-[10px] font-mono flex items-center gap-1.5"
+          data-testid="chat-typing-indicator"
+        >
+          <div className="flex items-center gap-1">
+            <span className="h-1.5 w-1.5 rounded-full bg-[#e5ff00] animate-ping" />
+            <span className="h-1.5 w-1.5 rounded-full bg-[#e5ff00] animate-bounce" />
+          </div>
+          <span className="text-[#e5ff00] font-bold">
+            {Object.values(typingUsers)
+              .map((u) => u.displayName || u.username)
+              .join(", ")}
+          </span>
+          <span className="text-zinc-400">
+            {Object.keys(typingUsers).length === 1 ? "is typing..." : "are typing..."}
+          </span>
+        </div>
+      )}
+
       {/* Input Bar */}
       <footer className="border-t border-[#27272a] p-3 bg-[#0a0a0a]">
         <div className="space-y-2">
-          <div className="flex items-center justify-between">
+          {/* Unlocked Chat Bar & Guest Status */}
+          <div className="flex flex-wrap items-center justify-between gap-1 text-[10px] font-mono">
             <button
               type="button"
               onClick={() => setIsHighlight(!isHighlight)}
@@ -371,12 +510,36 @@ export default function ChatPanel({ username }) {
             </button>
 
             {!user ? (
-              <Link
-                to="/login"
-                className="font-mono text-[9px] uppercase tracking-widest text-[#e5ff00] hover:underline flex items-center gap-1"
-              >
-                <LogIn className="h-2.5 w-2.5" /> LOG IN
-              </Link>
+              <div className="flex items-center gap-1 text-zinc-400">
+                <span className="border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 font-bold text-emerald-400 text-[9px] uppercase rounded-xs">
+                  UNLOCKED (GUEST)
+                </span>
+                {isEditingGuestName ? (
+                  <form onSubmit={saveGuestName} className="flex items-center gap-1">
+                    <input
+                      className="bg-black border border-[#e5ff00] px-1 py-0.5 text-[10px] text-white focus:outline-none w-24"
+                      value={tempGuestName}
+                      onChange={(e) => setTempGuestName(e.target.value)}
+                      placeholder="Guest Name"
+                      autoFocus
+                    />
+                    <button type="submit" className="text-[#e5ff00] hover:underline font-bold text-[9px]">
+                      SAVE
+                    </button>
+                  </form>
+                ) : (
+                  <button
+                    onClick={() => {
+                      setTempGuestName(guestName);
+                      setIsEditingGuestName(true);
+                    }}
+                    className="hover:text-[#e5ff00] text-zinc-400 underline text-[9px] uppercase"
+                    title="Click to change guest display name"
+                  >
+                    Name: {guestName || "Guest"}
+                  </button>
+                )}
+              </div>
             ) : (
               <span className="font-mono text-[9px] uppercase tracking-widest text-zinc-500">
                 EARN 15⚡ / 10S
@@ -393,13 +556,11 @@ export default function ChatPanel({ username }) {
                   isHighlight ? "border-[#e5ff00] bg-[#e5ff00]/10 text-white font-bold" : ""
                 }`}
                 value={text}
-                onChange={(e) => setText(e.target.value)}
+                onChange={handleInputChange}
                 placeholder={
                   isHighlight
                     ? "⚡ SHOUT WITH HIGH VOLTAGE GLOW..."
-                    : !user
-                    ? "SHOUT AS GUEST (Or log in)..."
-                    : "SHOUT INTO THE ROOM…"
+                    : "SHOUT INTO CHAT (Unlocked for all)..."
                 }
                 maxLength={500}
                 disabled={!connected}
@@ -533,6 +694,16 @@ function BadgeFlares({ badges }) {
 
   return (
     <div className="flex items-center gap-1">
+      {badges.includes("guest") && (
+        <span
+          className="inline-flex items-center gap-0.5 border border-zinc-700 bg-zinc-800/80 px-1 py-0.2 font-mono text-[8px] uppercase font-bold text-zinc-300 rounded-xs"
+          title="Guest Chatter"
+          data-testid="badge-guest"
+        >
+          <User className="h-2.5 w-2.5" /> GUEST
+        </span>
+      )}
+
       {badges.includes("broadcaster") && (
         <span
           className="inline-flex items-center gap-0.5 border border-[#e5ff00] bg-[#e5ff00]/15 px-1 py-0.2 font-mono text-[8px] uppercase font-bold text-[#e5ff00] shadow-[0_0_8px_rgba(229,255,0,0.5)] rounded-xs"

@@ -110,7 +110,17 @@ export default function Directory() {
                 viewer_count: fsData.viewer_count ?? c.viewer_count,
                 stream_title: fsData.stream_title || c.stream_title,
                 category: fsData.category || c.category,
-                schedule: fsData.schedule || c.schedule,
+                schedule:
+                  fsData.schedule ||
+                  (fsData.schedule_json
+                    ? (() => {
+                        try {
+                          return JSON.parse(fsData.schedule_json);
+                        } catch (e) {
+                          return c.schedule;
+                        }
+                      })()
+                    : c.schedule),
               };
             }
             return c;
@@ -204,7 +214,7 @@ export default function Directory() {
     <div>
       <StoriesSection />
 
-      <div className="mx-auto max-w-[1440px] px-6 py-8" data-testid="streamer-directory-page">
+      <div className="mx-auto max-w-[1440px] px-6 pt-8 pb-24 sm:pb-28 lg:pb-32" data-testid="streamer-directory-page">
       {/* Header Banner */}
       <div className="border border-[#27272a] bg-[#0a0a0a] p-8">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { api, fileUrl } from "@/lib/api";
+import { api, fileUrl, apiErrorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { updateUserProfileInFirestore } from "@/lib/firebase";
 import HlsPlayer from "@/components/HlsPlayer";
 import SessionList from "@/components/SessionList";
 import ScheduleManager from "@/components/ScheduleManager";
@@ -38,18 +39,40 @@ export default function Dashboard() {
   const localKeyName = user?.uid ? `sparkz_stream_key_${user.uid}` : "sparkz_stream_key";
   const localPlaybackName = user?.uid ? `sparkz_playback_id_${user.uid}` : "sparkz_playback_id";
 
+  // Pre-load from local storage instantly before network requests finish
+  useEffect(() => {
+    const cachedKey = localStorage.getItem(localKeyName) || localStorage.getItem("sparkz_stream_key") || "";
+    const cachedPlayback = localStorage.getItem(localPlaybackName) || localStorage.getItem("sparkz_playback_id") || "";
+
+    if (cachedKey || cachedPlayback) {
+      setChannel((prev) => ({
+        ...(prev || {}),
+        stream_key: cachedKey || prev?.stream_key || "",
+        playback_id: cachedPlayback || prev?.playback_id || "",
+        rtmp_url: prev?.rtmp_url || "rtmp://rtmp.livepeer.com/live",
+        playback_url: prev?.playback_url || (cachedPlayback ? `https://livepeercdn.studio/hls/${cachedPlayback}/index.m3u8` : ""),
+      }));
+    }
+  }, [user?.uid, localKeyName, localPlaybackName]);
+
   const load = async () => {
     try {
       const { data } = await api.get("/channels/mine");
       if (data) {
-        const storedKey = localStorage.getItem(localKeyName) || "";
-        const storedPlayback = localStorage.getItem(localPlaybackName) || "";
+        const storedKey = localStorage.getItem(localKeyName) || localStorage.getItem("sparkz_stream_key") || "";
+        const storedPlayback = localStorage.getItem(localPlaybackName) || localStorage.getItem("sparkz_playback_id") || "";
 
         const finalKey = data.stream_key || storedKey || "";
         const finalPlayback = data.playback_id || storedPlayback || "";
 
-        if (finalKey) localStorage.setItem(localKeyName, finalKey);
-        if (finalPlayback) localStorage.setItem(localPlaybackName, finalPlayback);
+        if (finalKey) {
+          localStorage.setItem(localKeyName, finalKey);
+          localStorage.setItem("sparkz_stream_key", finalKey);
+        }
+        if (finalPlayback) {
+          localStorage.setItem(localPlaybackName, finalPlayback);
+          localStorage.setItem("sparkz_playback_id", finalPlayback);
+        }
 
         setChannel((prev) => ({
           ...(prev || {}),
@@ -68,14 +91,20 @@ export default function Dashboard() {
         setTitle(data.stream_title || "");
         setCategory(data.category || "music");
 
-        // Automatically fetch/ensure permanent stream key if missing
+        // Automatically fetch/ensure permanent stream key if missing from backend and cache
         if (!finalKey || !finalPlayback) {
           const res = await api.post("/stream/create", { forceNew: false });
           if (res.data && res.data.channel) {
             const k = res.data.channel.stream_key || "";
             const p = res.data.channel.playback_id || "";
-            if (k) localStorage.setItem(localKeyName, k);
-            if (p) localStorage.setItem(localPlaybackName, p);
+            if (k) {
+              localStorage.setItem(localKeyName, k);
+              localStorage.setItem("sparkz_stream_key", k);
+            }
+            if (p) {
+              localStorage.setItem(localPlaybackName, p);
+              localStorage.setItem("sparkz_playback_id", p);
+            }
 
             setChannel((prev) => ({
               ...(prev || {}),
@@ -87,8 +116,14 @@ export default function Dashboard() {
           } else if (res.data && res.data.stream_key) {
             const k = res.data.stream_key;
             const p = res.data.playback_id;
-            if (k) localStorage.setItem(localKeyName, k);
-            if (p) localStorage.setItem(localPlaybackName, p);
+            if (k) {
+              localStorage.setItem(localKeyName, k);
+              localStorage.setItem("sparkz_stream_key", k);
+            }
+            if (p) {
+              localStorage.setItem(localPlaybackName, p);
+              localStorage.setItem("sparkz_playback_id", p);
+            }
 
             setChannel((prev) => ({
               ...(prev || {}),
@@ -114,7 +149,7 @@ export default function Dashboard() {
       .get("/livepeer/webhook/status")
       .then(({ data }) => setAutoDetect(!!data.configured))
       .catch(() => setAutoDetect(true));
-  }, []);
+  }, [user?.uid]);
 
   // Poll for auto-detected go-live from Livepeer while dashboard is open
   useEffect(() => {
@@ -162,22 +197,40 @@ export default function Dashboard() {
       const { data } = await api.patch("/channels/mine", {
         stream_title: title,
         category,
+        stream_key: channel?.stream_key || undefined,
+        playback_id: channel?.playback_id || undefined,
+        livepeer_stream_id: channel?.livepeer_stream_id || undefined,
+        thumbnail_url: channel?.thumbnail_url || undefined,
       });
+      if (user?.uid) {
+        updateUserProfileInFirestore(user.uid, { thumbnail_url: channel?.thumbnail_url || null }).catch(() => {});
+      }
+      const finalKey = data.stream_key || channel?.stream_key || "";
+      const finalPlayback = data.playback_id || channel?.playback_id || "";
+
+      if (finalKey) {
+        localStorage.setItem(localKeyName, finalKey);
+        localStorage.setItem("sparkz_stream_key", finalKey);
+      }
+      if (finalPlayback) {
+        localStorage.setItem(localPlaybackName, finalPlayback);
+        localStorage.setItem("sparkz_playback_id", finalPlayback);
+      }
+
       setChannel((prev) => ({
         ...(prev || {}),
         ...data,
-        stream_key: data.stream_key || prev?.stream_key || "",
-        playback_id: data.playback_id || prev?.playback_id || "",
+        stream_key: finalKey,
+        playback_id: finalPlayback,
         rtmp_url: data.rtmp_url || prev?.rtmp_url || "rtmp://rtmp.livepeer.com/live",
         playback_url:
           data.playback_url ||
           prev?.playback_url ||
-          (data.playback_id || prev?.playback_id
-            ? `https://livepeercdn.studio/hls/${data.playback_id || prev?.playback_id}/index.m3u8`
-            : ""),
+          (finalPlayback ? `https://livepeercdn.studio/hls/${finalPlayback}/index.m3u8` : ""),
       }));
       toast.success("Channel updated.");
     } catch (e) {
+      console.error("Save channel error:", e);
       toast.error("Failed to update channel.");
     }
   };
@@ -317,7 +370,7 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="mx-auto max-w-[1440px] px-6 py-8" data-testid="dashboard-page">
+    <div className="mx-auto max-w-[1440px] px-6 pt-8 pb-24 sm:pb-28 lg:pb-32" data-testid="dashboard-page">
       <header className="mb-8 flex flex-col items-start justify-between gap-4 border-b border-[#27272a] pb-6 sm:flex-row sm:items-end">
         <div>
           <div className="label-caps">// STUDIO</div>
@@ -579,6 +632,7 @@ function CredentialRow({ label, value, secret, onCopy, onToggle, reveal, placeho
 }
 
 function ThumbnailUploader({ channel, onChange }) {
+  const { user } = useAuth();
   const fileRef = useRef(null);
   const [uploading, setUploading] = useState(false);
   const [clearing, setClearing] = useState(false);
@@ -598,13 +652,15 @@ function ThumbnailUploader({ channel, onChange }) {
     try {
       const fd = new FormData();
       fd.append("file", file);
-      const { data } = await api.post("/channels/mine/thumbnail", fd, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
+      const { data } = await api.post("/channels/mine/thumbnail", fd);
       onChange?.({ ...channel, thumbnail_url: data.thumbnail_url });
+      if (user?.uid) {
+        updateUserProfileInFirestore(user.uid, { thumbnail_url: data.thumbnail_url }, channel?.username || user?.username).catch(() => {});
+      }
       toast.success("Preview thumbnail updated.");
-    } catch {
-      toast.error("Upload failed.");
+    } catch (err) {
+      console.error("Thumbnail upload error:", err);
+      toast.error(apiErrorMessage(err) || "Upload failed.");
     } finally {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = "";
@@ -616,6 +672,9 @@ function ThumbnailUploader({ channel, onChange }) {
     try {
       await api.delete("/channels/mine/thumbnail");
       onChange?.({ ...channel, thumbnail_url: null });
+      if (user?.uid) {
+        updateUserProfileInFirestore(user.uid, { thumbnail_url: null }).catch(() => {});
+      }
       toast.success("Thumbnail cleared.");
     } catch {
       toast.error("Could not clear thumbnail.");

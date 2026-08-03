@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
-import { api, fileUrl } from "@/lib/api";
+import { api, fileUrl, apiErrorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import {
   Plus,
@@ -67,8 +67,8 @@ export default function StoriesSection() {
           setActiveStoryIndex(stories.length - 2);
         }
       }
-    } catch {
-      toast.error("Failed to delete story");
+    } catch (err) {
+      toast.error(apiErrorMessage(err) || "Failed to delete story");
     }
   };
 
@@ -233,7 +233,6 @@ function StoryViewerModal({
   const [paused, setPaused] = useState(false);
   const [progress, setProgress] = useState(0);
   const duration = 7; // 7 seconds per story
-  const timerRef = useRef(null);
 
   useEffect(() => {
     setProgress(0);
@@ -245,23 +244,28 @@ function StoryViewerModal({
     const interval = 50; // update progress every 50ms
     const step = (interval / (duration * 1000)) * 100;
 
-    timerRef.current = setInterval(() => {
+    const timer = setInterval(() => {
       setProgress((prev) => {
-        if (prev >= 100) {
-          clearInterval(timerRef.current);
-          if (currentIndex < stories.length - 1) {
-            setCurrentIndex(currentIndex + 1);
-          } else {
-            onClose();
-          }
-          return 0;
+        const next = prev + step;
+        if (next >= 100) {
+          return 100;
         }
-        return prev + step;
+        return next;
       });
     }, interval);
 
-    return () => clearInterval(timerRef.current);
-  }, [currentIndex, paused, stories.length]);
+    return () => clearInterval(timer);
+  }, [currentIndex, paused, story, duration]);
+
+  useEffect(() => {
+    if (progress >= 100) {
+      if (currentIndex < stories.length - 1) {
+        setCurrentIndex((i) => i + 1);
+      } else {
+        onClose();
+      }
+    }
+  }, [progress, currentIndex, stories.length, onClose, setCurrentIndex]);
 
   if (!story) return null;
 
@@ -478,15 +482,13 @@ function CreateStoryModal({ onClose, onSuccess }) {
       formData.append("caption", caption);
       formData.append("media_type", mediaType);
 
-      await api.post("/stories", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
+      await api.post("/stories", formData);
 
       toast.success("24-Hour Story Published! ⚡");
       onSuccess();
     } catch (err) {
-      console.error(err);
-      toast.error("Failed to upload story");
+      console.error("Story upload error:", err);
+      toast.error(apiErrorMessage(err) || "Failed to upload story");
     } finally {
       setUploading(false);
     }

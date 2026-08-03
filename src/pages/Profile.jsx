@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { api, fileUrl } from "@/lib/api";
+import { api, fileUrl, apiErrorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { updateUserProfileInFirestore } from "@/lib/firebase";
 import { toast } from "sonner";
 import { Upload, User, Copy, RefreshCw, Radio, Eye, EyeOff } from "lucide-react";
 
@@ -41,14 +42,39 @@ export default function Profile() {
   const save = async () => {
     setSaving(true);
     try {
-      const { data } = await api.patch("/users/me", {
+      const payload = {
         display_name: displayName,
         bio,
-      });
-      setUser(data);
-      toast.success("Profile updated.");
-    } catch {
-      toast.error("Failed to save profile.");
+      };
+
+      let updatedData = null;
+      try {
+        const { data } = await api.patch("/users/me", payload);
+        updatedData = data;
+      } catch (err1) {
+        try {
+          const { data } = await api.put("/users/me", payload);
+          updatedData = data;
+        } catch (err2) {
+          const { data } = await api.post("/users/me", payload);
+          updatedData = data;
+        }
+      }
+
+      if (user?.uid) {
+        updateUserProfileInFirestore(user.uid, payload).catch(() => {});
+      }
+
+      if (updatedData) {
+        setUser((prev) => (prev ? { ...prev, ...updatedData } : updatedData));
+      } else {
+        setUser((prev) => (prev ? { ...prev, display_name: displayName, bio } : { display_name: displayName, bio }));
+      }
+
+      toast.success("Profile updated successfully!");
+    } catch (err) {
+      console.error("Save profile error:", err);
+      toast.error(apiErrorMessage(err) || "Failed to save profile.");
     } finally {
       setSaving(false);
     }
@@ -69,13 +95,21 @@ export default function Profile() {
     try {
       const fd = new FormData();
       fd.append("file", file);
-      await api.post("/users/me/photo", fd, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
-      await refresh();
+      const { data } = await api.post("/users/me/photo", fd);
+      const photoUrl = data?.photo_url || data?.url || data?.avatar_url;
+      if (photoUrl) {
+        setUser((prev) => ({ ...prev, photo_url: photoUrl }));
+        if (user?.uid) {
+          await updateUserProfileInFirestore(user.uid, { photo_url: photoUrl }, user.username);
+        }
+      }
+      if (typeof refresh === "function") {
+        await refresh();
+      }
       toast.success("Photo updated.");
-    } catch {
-      toast.error("Upload failed.");
+    } catch (err) {
+      console.error("Photo upload error:", err);
+      toast.error(apiErrorMessage(err) || "Upload photo failed.");
     } finally {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = "";
@@ -85,7 +119,7 @@ export default function Profile() {
   if (!user) return null;
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-12" data-testid="profile-page">
+    <div className="mx-auto max-w-3xl px-6 pt-12 pb-24 sm:pb-28 lg:pb-32" data-testid="profile-page">
       <div className="label-caps">// PROFILE</div>
       <h1 className="mb-8 font-display text-4xl font-black tracking-tighter sm:text-5xl">
         EDIT YOUR SIGNATURE
@@ -100,7 +134,7 @@ export default function Profile() {
                 <img
                   src={fileUrl(user.photo_url)}
                   alt=""
-                  className="h-40 w-40 border border-[#27272a] object-cover grayscale"
+                  className="h-40 w-40 border border-[#27272a] object-cover"
                   data-testid="profile-avatar"
                 />
               ) : (
