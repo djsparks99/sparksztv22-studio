@@ -13,6 +13,7 @@ import Register from "@/pages/Register";
 import Channel from "@/pages/Channel";
 import Dashboard from "@/pages/Dashboard";
 import Profile from "@/pages/Profile";
+import ObsOverlay from "@/pages/ObsOverlay";
 import { useLivepeerAutoPoll } from "@/hooks/useLivepeerAutoPoll";
 
 const SIDEBAR_STORAGE_KEY = "sparkz_sidebar_collapsed";
@@ -96,6 +97,7 @@ export default function App() {
       <BrowserRouter>
         <ScrollToTop />
         <Routes>
+          <Route path="/overlay/:username" element={<ObsOverlay />} />
           <Route element={<SiteLayout />}>
             <Route path="/" element={<Browse />} />
             <Route path="/directory" element={<Directory />} />

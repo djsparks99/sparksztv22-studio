@@ -496,6 +496,12 @@ export default function Dashboard() {
                 onCopy={copy}
                 testid="playback-url"
               />
+              <CredentialRow
+                label="OBS BROWSER OVERLAY"
+                value={`${window.location.origin}/overlay/${channel.username || ""}`}
+                onCopy={copy}
+                testid="obs-overlay-url"
+              />
             </div>
             <p className="mt-4 border-t border-[#27272a] pt-4 font-mono text-[11px] leading-relaxed text-zinc-500">
               → Open OBS → Settings → Stream → Service: Custom → paste RTMP + Stream Key → Start

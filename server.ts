@@ -660,6 +660,9 @@ interface ChatMessageDoc {
   highlight_type?: string;
   sender_badges?: string[];
   sender_color?: string;
+  is_system_command?: boolean;
+  command_action?: string;
+  command_target?: string;
 }
 
 interface ViewerSessionDoc {
@@ -2788,6 +2791,41 @@ async function startServer() {
         channel_user_uid: targetChannel.user_uid,
         created_at: nowIso(),
       });
+
+      // Automatically generate and post a real-time system/bot message in that channel's chat room!
+      const followBotMsg: ChatMessageDoc = {
+        id: crypto.randomUUID(),
+        channel_username: uname,
+        text: `🎉 @${user.display_name} just followed the stream, thank you for following @${user.display_name}! 🎉`,
+        sender_uid: "system-bot",
+        sender_username: "sparkz_bot",
+        sender_display_name: "SPARKZ BOT 🤖",
+        sender_photo_url: null,
+        created_at: nowIso(),
+        is_highlighted: true,
+        highlight_type: "follow_alert",
+        sender_badges: ["bot", "system"],
+        sender_color: "#e5ff00",
+        is_system_command: true,
+        command_action: "follow",
+        command_target: user.username,
+      };
+
+      db.chatMessages.push(followBotMsg);
+
+      const room = wsRooms.get(uname);
+      if (room) {
+        const payload = JSON.stringify({
+          type: "message",
+          ...followBotMsg,
+          user_watts: 250,
+        });
+        for (const clientSocket of room) {
+          if (clientSocket.readyState === WebSocket.OPEN) {
+            clientSocket.send(payload);
+          }
+        }
+      }
     }
 
     res.json({ following: true, follower_count: getFollowerCount(uname) });
@@ -3542,6 +3580,85 @@ async function startServer() {
       for (const clientSocket of room) {
         if (clientSocket.readyState === WebSocket.OPEN) {
           clientSocket.send(broadcastPayload);
+        }
+      }
+
+      // Parse Interactive Chat Commands
+      if (text.startsWith("!")) {
+        const cmdLine = text.slice(1).trim();
+        const spaceIndex = cmdLine.indexOf(" ");
+        let command = "";
+        let target = "";
+        if (spaceIndex === -1) {
+          command = cmdLine.toLowerCase();
+        } else {
+          command = cmdLine.substring(0, spaceIndex).toLowerCase();
+          target = cmdLine.substring(spaceIndex + 1).trim();
+        }
+
+        if (command) {
+          let botText = "";
+          let isValidCommand = false;
+
+          if (command === "hug") {
+            isValidCommand = true;
+            if (target) {
+              botText = `🤗 @${user!.display_name} sends a warm, glowing holographic hug to @${target}! 💖⚡️`;
+            } else {
+              botText = `🤗 @${user!.display_name} is wrapping everyone in chat in a warm, glowing holographic hug! 🥰✨`;
+            }
+          } else if (command === "so" || command === "shoutout") {
+            isValidCommand = true;
+            if (target) {
+              const cleanTarget = target.startsWith("@") ? target.slice(1) : target;
+              botText = `📣 SHOUT OUT to the legendary @${cleanTarget}! Go tune in and lock into their frequency at sparkz.tv/channel/${cleanTarget.toLowerCase()}! 🚀⚡️`;
+            } else {
+              botText = `📣 SHOUT OUT to everyone locking into the Sparkz frequencies! YOUR STREAM YOUR MIX YOUR RULES! 💥📻`;
+            }
+          } else if (command === "rules") {
+            isValidCommand = true;
+            botText = `📻 Sparkz.TV Rules: 1. Keep it high energy ⚡️ 2. No bad vibes 🚫 3. Respect the DJ and chat 🤝 4. YOUR STREAM YOUR MIX YOUR RULES! 💥`;
+          } else if (command === "watts") {
+            isValidCommand = true;
+            const currentWatts = user!.watts ?? 250;
+            botText = `⚡️ @${user!.display_name}, you currently hold ${currentWatts} Watts of signal power! Keep active to accrue more! 🔋`;
+          }
+
+          if (isValidCommand && botText) {
+            const botMsgDoc: ChatMessageDoc = {
+              id: crypto.randomUUID(),
+              channel_username: channelUsername,
+              text: botText,
+              sender_uid: "system-bot",
+              sender_username: "sparkz_bot",
+              sender_display_name: "SPARKZ BOT 🤖",
+              sender_photo_url: null,
+              created_at: nowIso(),
+              is_highlighted: true,
+              highlight_type: "command_alert",
+              sender_badges: ["bot", "system"],
+              sender_color: "#e5ff00",
+              is_system_command: true,
+              command_action: command,
+              command_target: target || "all",
+            };
+
+            db.chatMessages.push(botMsgDoc);
+
+            const botPayload = JSON.stringify({
+              type: "message",
+              ...botMsgDoc,
+              user_watts: 250,
+            });
+
+            setTimeout(() => {
+              for (const clientSocket of room) {
+                if (clientSocket.readyState === WebSocket.OPEN) {
+                  clientSocket.send(botPayload);
+                }
+              }
+            }, 300);
+          }
         }
       }
     });

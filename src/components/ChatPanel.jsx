@@ -169,6 +169,9 @@ export default function ChatPanel({ username }) {
                 highlight_type: data.highlight_type,
                 sender_badges: data.sender_badges,
                 sender_color: data.sender_color,
+                is_system_command: data.is_system_command,
+                command_action: data.command_action,
+                command_target: data.command_target,
               },
             ]);
 
@@ -594,6 +597,7 @@ export default function ChatPanel({ username }) {
 
 function ChatMessage({ m, emotes }) {
   const isHighVoltage = m.is_highlighted;
+  const isSystemCommand = m.is_system_command || m.sender_uid === "system-bot" || m.sender_username === "sparkz_bot";
 
   // Emote parser helper
   const renderMessageContent = (text, emoteList) => {
@@ -624,6 +628,36 @@ function ChatMessage({ m, emotes }) {
       return part;
     });
   };
+
+  if (isSystemCommand) {
+    return (
+      <div
+        className="relative overflow-hidden p-3 my-2 border border-[#e5ff00] bg-black/60 shadow-[0_0_15px_rgba(229,255,0,0.15)] rounded-sm font-mono text-xs animate-fade-in"
+        data-testid={`chat-msg-system-${m.id}`}
+      >
+        {/* Decorative corner lines */}
+        <div className="absolute top-0 left-0 w-1.5 h-1.5 border-t border-l border-[#e5ff00]" />
+        <div className="absolute top-0 right-0 w-1.5 h-1.5 border-t border-r border-[#e5ff00]" />
+        <div className="absolute bottom-0 left-0 w-1.5 h-1.5 border-b border-l border-[#e5ff00]" />
+        <div className="absolute bottom-0 right-0 w-1.5 h-1.5 border-b border-r border-[#e5ff00]" />
+        
+        <div className="flex items-center gap-2 mb-1.5">
+          <div className="flex h-5 w-5 items-center justify-center border border-[#e5ff00] bg-[#e5ff00]/10 rounded-xs">
+            <Sparkles className="h-3 w-3 text-[#e5ff00] animate-pulse" />
+          </div>
+          <span className="text-[9px] uppercase font-bold text-[#e5ff00] tracking-widest">
+            SPARKZ ALERT // SYSTEM BOT
+          </span>
+          <span className="ml-auto text-[8px] text-zinc-500">
+            {m.created_at ? new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : ""}
+          </span>
+        </div>
+        <div className="text-zinc-100 font-bold leading-relaxed tracking-wide">
+          {renderMessageContent(m.text, emotes)}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
