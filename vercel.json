@@ -1,36 +1,22 @@
 {
   "version": 2,
+  "cleanUrls": true,
+  "trailingSlash": false,
   "rewrites": [
     {
-      "source": "/api/upload",
-      "destination": "/api/upload.ts"
-    },
-    {
-      "source": "/api/users",
-      "destination": "/api/users.ts"
-    },
-    {
-      "source": "/api/users/:path*",
-      "destination": "/api/users.ts"
-    },
-    {
-      "source": "/api/stream",
-      "destination": "/api/stream.ts"
-    },
-    {
-      "source": "/api/stream/:path*",
-      "destination": "/api/stream.ts"
-    },
-    {
-      "source": "/api/:path*",
+      "source": "/api/(.*)",
       "destination": "/api/index.ts"
     },
     {
-      "source": "/uploads/:path*",
+      "source": "/uploads/(.*)",
       "destination": "/api/index.ts"
     },
     {
-      "source": "/((?!api|uploads).*)",
+      "source": "/files/(.*)",
+      "destination": "/api/index.ts"
+    },
+    {
+      "source": "/(.*)",
       "destination": "/index.html"
     }
   ],
