@@ -26,14 +26,37 @@ try {
   console.error("Error reading firebase-applet-config.json:", e);
 }
 
+// Environment variables fallback for dedicated hosting environments
+firebaseConfig.projectId = firebaseConfig.projectId || process.env.FIREBASE_PROJECT_ID || process.env.GCP_PROJECT || "ai-studio-sparksztv22-93d657ea-0def-4bee-a52e-2b85b2f712b1";
+firebaseConfig.apiKey = firebaseConfig.apiKey || process.env.FIREBASE_API_KEY;
+firebaseConfig.firestoreDatabaseId = firebaseConfig.firestoreDatabaseId || process.env.FIREBASE_DATABASE_ID || "(default)";
+
+// Log clear diagnostics about our external dependencies to prevent silent crashes
+if (!firebaseConfig.projectId) {
+  console.error("DATABASE SAFETY WARNING: FIREBASE_PROJECT_ID is not configured. Database operations will fail.");
+} else {
+  console.log(`Database configuration set to use project ID: "${firebaseConfig.projectId}"`);
+}
+
+if (!firebaseConfig.apiKey) {
+  console.warn("DATABASE SAFETY WARNING: FIREBASE_API_KEY is not configured. External REST database fallback will be unavailable.");
+}
+
+if (!process.env.JWT_SECRET) {
+  console.warn("SECURITY WARNING: JWT_SECRET environment variable is missing. Falling back to a hardcoded placeholder secret.");
+}
+
+if (!process.env.LIVEPEER_API_KEY) {
+  console.warn("INTEGRATION WARNING: LIVEPEER_API_KEY environment variable is not set. Real-time stream generation will be unavailable.");
+}
+
 // Safely initialize Firebase Admin SDK for server-side admin operations
 try {
   if (admin && admin.apps && Array.isArray(admin.apps) && admin.apps.length === 0) {
-    const projectId = firebaseConfig.projectId || process.env.GCP_PROJECT || process.env.FIREBASE_PROJECT_ID || "ai-studio-sparksztv22-93d657ea-0def-4bee-a52e-2b85b2f712b1";
     admin.initializeApp({
-      projectId,
+      projectId: firebaseConfig.projectId,
     });
-    console.log(`Firebase Admin SDK initialized successfully for project: "${projectId}"`);
+    console.log(`Firebase Admin SDK initialized successfully for project: "${firebaseConfig.projectId}"`);
   }
 } catch (e) {
   console.error("Failed to initialize Firebase Admin SDK (continuing with REST API fallback):", e);
@@ -3137,20 +3160,18 @@ async function startServer() {
   ], api);
 
   // Vite Integration
-  if (!process.env.VERCEL) {
-    if (process.env.NODE_ENV !== "production") {
-      const vite = await createViteServer({
-        server: { middlewareMode: true },
-        appType: "spa",
-      });
-      app.use(vite.middlewares);
-    } else {
-      const distPath = path.join(process.cwd(), "dist");
-      app.use(express.static(distPath));
-      app.get("*", (req, res) => {
-        res.sendFile(path.join(distPath, "index.html"));
-      });
-    }
+  if (process.env.NODE_ENV !== "production") {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), "dist");
+    app.use(express.static(distPath));
+    app.get("*", (req, res) => {
+      res.sendFile(path.join(distPath, "index.html"));
+    });
   }
 
   // HTTP Server & WebSocket
