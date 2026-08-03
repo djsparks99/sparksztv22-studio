@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Eye, Radio, Flame, Trophy, Play, ArrowRight, User } from "lucide-react";
+import { Eye, Radio, Trophy, Play, ArrowRight, User } from "lucide-react";
 import { fileUrl } from "@/lib/api";
 
 const FALLBACK_THUMBS = [
@@ -116,10 +116,6 @@ export default function TopStreamersHero({ allChannels = [] }) {
         {/* Section Title Header */}
         <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between" id="hero-header-section">
           <div>
-            <div className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.2em] text-[#e5ff00]">
-              <Flame className="h-3.5 w-3.5 text-[#e5ff00]" />
-              <span>RANKED TOP STREAMERS</span>
-            </div>
             <h1 className="mt-0.5 font-display text-2xl font-black uppercase tracking-tight text-white sm:text-3xl lg:text-4xl">
               LEADERBOARD <span className="text-[#e5ff00]">BROADCASTS</span>
             </h1>
