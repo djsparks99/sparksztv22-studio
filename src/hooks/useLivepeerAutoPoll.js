@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { db } from "@/lib/firebase";
 import { doc, setDoc } from "firebase/firestore";
+import { api } from "@/lib/api";
 
 export function useLivepeerAutoPoll(channelIdentifier) {
   useEffect(() => {
@@ -8,22 +9,39 @@ export function useLivepeerAutoPoll(channelIdentifier) {
 
     const pollStatus = async () => {
       try {
-        // If we don't have a stream identifier to check, skip
         if (!channelIdentifier) return;
 
-        // Directly query Livepeer Studio API using the correct path parameter
+        // Preferred: Call backend check-status route which uses backend LIVEPEER_API_KEY
+        try {
+          const { data } = await api.post("/livepeer/check-status", {
+            channel_id: channelIdentifier,
+            stream_id: channelIdentifier,
+            username: channelIdentifier,
+          });
+          if (data && typeof data.is_live === "boolean") {
+            return; // Backend already updated Firestore
+          }
+        } catch {
+          // Fallback if backend route fails
+        }
+
+        const clientApiKey =
+          typeof import.meta !== "undefined" && import.meta.env
+            ? import.meta.env.VITE_LIVEPEER_API_KEY
+            : null;
+
+        if (!clientApiKey) return;
+
         const response = await fetch(`https://livepeer.studio/api/stream/${channelIdentifier}`, {
           method: "GET",
           headers: {
-            Authorization: `Bearer ${import.meta.env.VITE_LIVEPEER_API_KEY}`,
+            Authorization: `Bearer ${clientApiKey}`,
             "Content-Type": "application/json",
           },
         });
 
         if (!response.ok) return;
         const streamData = await response.json();
-        
-        // Livepeer returns a single stream object containing an isActive boolean field
         const isLive = Boolean(streamData?.isActive);
         const nowIso = new Date().toISOString();
 

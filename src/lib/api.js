@@ -1,7 +1,38 @@
 import axios from "axios";
 
-const BACKEND_URL =
-  (typeof process !== "undefined" && process.env?.REACT_APP_BACKEND_URL) || "";
+function getBackendUrl() {
+  let envVal = "";
+  if (typeof import.meta !== "undefined" && import.meta.env) {
+    envVal =
+      import.meta.env.VITE_BACKEND_URL ||
+      import.meta.env.VITE_API_URL ||
+      import.meta.env.REACT_APP_BACKEND_URL ||
+      import.meta.env.VITE_APP_BACKEND_URL ||
+      "";
+  }
+  if (!envVal && typeof process !== "undefined" && process.env) {
+    envVal =
+      process.env.VITE_BACKEND_URL ||
+      process.env.VITE_API_URL ||
+      process.env.REACT_APP_BACKEND_URL ||
+      process.env.VITE_APP_BACKEND_URL ||
+      "";
+  }
+  if (!envVal && typeof window !== "undefined" && window.__ENV__) {
+    envVal =
+      window.__ENV__.VITE_BACKEND_URL ||
+      window.__ENV__.REACT_APP_BACKEND_URL ||
+      "";
+  }
+  if (!envVal) return "";
+  let clean = String(envVal).trim().replace(/\/+$/, "");
+  if (clean.endsWith("/api")) {
+    clean = clean.slice(0, -4);
+  }
+  return clean;
+}
+
+const BACKEND_URL = getBackendUrl();
 export const API = BACKEND_URL ? `${BACKEND_URL}/api` : "/api";
 export const BACKEND = BACKEND_URL;
 
@@ -52,6 +83,17 @@ export function apiErrorMessage(err) {
 
 export function fileUrl(pathOrUrl) {
   if (!pathOrUrl) return null;
-  if (pathOrUrl.startsWith("http")) return pathOrUrl;
-  return `${BACKEND_URL}${pathOrUrl}`;
+  if (
+    pathOrUrl.startsWith("http://") ||
+    pathOrUrl.startsWith("https://") ||
+    pathOrUrl.startsWith("blob:") ||
+    pathOrUrl.startsWith("data:")
+  ) {
+    return pathOrUrl;
+  }
+  const cleanPath = pathOrUrl.startsWith("/") ? pathOrUrl : `/${pathOrUrl}`;
+  if (BACKEND_URL) {
+    return `${BACKEND_URL}${cleanPath}`;
+  }
+  return cleanPath;
 }
