@@ -598,7 +598,7 @@ async function startServer() {
   restoreChannelsFromFirestore().catch(() => {});
   restoreEmotesFromFirestore().catch(() => {});
 
-  // Direct Livepeer Webhook Handler on app to guarantee 200 OK responses
+  // Livepeer Webhook Handler for Automatic Live Status Auto-Detection
   app.post("/api/livepeer/webhook", async (req, res) => {
     try {
       const event = req.body;
@@ -643,7 +643,7 @@ async function startServer() {
     }
   });
 
-  // Direct un-routed dashboard endpoints to completely eliminate 404s
+  // Direct un-routed dashboard endpoints
   app.get("/api/channels/mine", requireAuth, async (req, res) => {
     try {
       const user = (req as any).user as UserDoc;
@@ -673,36 +673,9 @@ async function startServer() {
 
   const api = express.Router();
 
-  // Get channel by username
+  // Get channel by username (Fully Auto-Detected via Database / Webhooks)
   api.get("/channels/:username", async (req, res) => {
     const uname = req.params.username.toLowerCase();
-
-    // FORCE OVERRIDE FIX FOR DJSPARKZ LIVE STREAM
-    if (uname === "djsparkz" || uname === "nsu1v44xfnn3flojvnepqj6cbg2") {
-      return res.json({
-        channel_id: "nsU1v44XFnN3FloJvNePqj6cBG2",
-        user_uid: "nsU1v44XFnN3FloJvNePqj6cBG2",
-        username: "djsparkz",
-        display_name: "djsparkz",
-        photo_url: "/api/files/avatars/nsU1v44XFnN3FloJvNePqj6cBG2/53659e31-7e18-4e66-bae3-6343ed664f84.png",
-        thumbnail_url: "/api/files/thumbnails/nsU1v44XFnN3FloJvNePqj6cBG2/7d263b78-1f10-42f1-b5c4-c2668aee09a3.png",
-        playback_id: "e4b6kqzzldmvnpty",
-        playbackId: "e4b6kqzzldmvnpty",
-        stream_title: "djsparkz's Live Stream",
-        category: "music",
-        is_live: true,
-        isLive: true,
-        viewer_count: 1,
-        last_updated: new Date().toISOString(),
-        playback_url: "https://lvpr.tv/?v=e4b6kqzzldmvnpty",
-        record_enabled: true,
-        schedule: [],
-        follower_count: 0,
-        is_following: false,
-        subscriber_count: 0,
-        is_subscribed: false
-      });
-    }
 
     let found: ChannelDoc | null = null;
     for (const c of db.channels.values()) {
