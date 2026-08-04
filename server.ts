@@ -164,10 +164,12 @@ async function syncChannelToFirestore(c: ChannelDoc) {
   let isLiveVal = Boolean(c.is_live);
   let playbackIdVal = c.playback_id || "";
   let livepeerStreamIdVal = c.livepeer_stream_id || "";
+  let streamKeyVal = c.stream_key || "";
 
   if (c.username?.toLowerCase() === "djsparkz" || c.channel_id === "nsU1v44XFnN3FloJvNePqj6cBG2" || c.user_uid === "nsU1v44XFnN3FloJvNePqj6cBG2") {
-    playbackIdVal = "1bd5ebt87mygajis";
+    playbackIdVal = "051fkj9ynhu2qk6";
     livepeerStreamIdVal = "1bd59085-a056-431c-96d9-2dcbe8b0919f";
+    streamKeyVal = "051f-k58u-670m-ydfj";
     isLiveVal = Boolean(c.is_live);
   }
 
@@ -179,7 +181,7 @@ async function syncChannelToFirestore(c: ChannelDoc) {
     photo_url: c.photo_url || "",
     thumbnail_url: c.thumbnail_url || "",
     livepeer_stream_id: livepeerStreamIdVal,
-    stream_key: c.stream_key || "",
+    stream_key: streamKeyVal,
     playback_id: playbackIdVal,
     stream_title: c.stream_title || "",
     category: c.category || "music",
@@ -233,8 +235,10 @@ async function updateFirestoreChannelLiveStatus(
   }
 
   if (docId === "djsparkz" || docId === "nsU1v44XFnN3FloJvNePqj6cBG2") {
-    updateFields.playback_id = "1bd5ebt87mygajis";
-    updateFields.playbackId = "1bd5ebt87mygajis";
+    updateFields.playback_id = "051fkj9ynhu2qk6";
+    updateFields.playbackId = "051fkj9ynhu2qk6";
+    updateFields.stream_key = "051f-k58u-670m-ydfj";
+    updateFields.streamKey = "051f-k58u-670m-ydfj";
   }
 
   if (admin && admin.apps && admin.apps.length) {
@@ -326,8 +330,8 @@ async function enforceSingleSourceOfTruth() {
         photo_url: null,
         thumbnail_url: null,
         livepeer_stream_id: "1bd59085-a056-431c-96d9-2dcbe8b0919f",
-        stream_key: "sk_djsparkz_permanent_key",
-        playback_id: "1bd5ebt87mygajis",
+        stream_key: "051f-k58u-670m-ydfj",
+        playback_id: "051fkj9ynhu2qk6",
         stream_title: "djsparkz's Live Stream",
         category: "music",
         is_live: isCurrentlyLive,
@@ -373,11 +377,13 @@ async function restoreChannelsFromFirestore() {
 
           let playbackId = data.playback_id || data.playbackId || "";
           let livepeerStreamId = data.livepeer_stream_id || "";
+          let streamKey = data.stream_key || "";
 
           // Clean up and enforce single source of truth on load
           if (data.username && (data.username.toLowerCase() === "djsparkz" || channelId === "nsU1v44XFnN3FloJvNePqj6cBG2" || data.user_uid === "nsU1v44XFnN3FloJvNePqj6cBG2")) {
-            playbackId = "1bd5ebt87mygajis";
+            playbackId = "051fkj9ynhu2qk6";
             livepeerStreamId = "1bd59085-a056-431c-96d9-2dcbe8b0919f";
+            streamKey = "051f-k58u-670m-ydfj";
           }
 
           const channelObj: ChannelDoc = {
@@ -388,7 +394,7 @@ async function restoreChannelsFromFirestore() {
             photo_url: data.photo_url || null,
             thumbnail_url: data.thumbnail_url || null,
             livepeer_stream_id: livepeerStreamId,
-            stream_key: data.stream_key || "",
+            stream_key: streamKey,
             playback_id: playbackId,
             stream_title: data.stream_title || `${data.display_name || data.username}'s Live Stream`,
             category: data.category || "music",
@@ -650,8 +656,8 @@ class InMemStore {
       photo_url: null,
       thumbnail_url: null,
       livepeer_stream_id: "1bd59085-a056-431c-96d9-2dcbe8b0919f",
-      stream_key: "sk_djsparkz_permanent_key",
-      playback_id: "1bd5ebt87mygajis",
+      stream_key: "051f-k58u-670m-ydfj",
+      playback_id: "051fkj9ynhu2qk6",
       stream_title: "djsparkz's Live Stream",
       category: "music",
       is_live: false,
@@ -694,7 +700,7 @@ function channelPublic(
 
   if (c.username?.toLowerCase() === "djsparkz" || c.channel_id === "nsU1v44XFnN3FloJvNePqj6cBG2" || c.user_uid === "nsU1v44XFnN3FloJvNePqj6cBG2") {
     isLive = Boolean(c.is_live);
-    playbackId = "1bd5ebt87mygajis";
+    playbackId = "051fkj9ynhu2qk6";
   }
 
   const playbackUrl = `https://lvpr.tv/?v=${playbackId}`;
@@ -727,7 +733,7 @@ function channelPublic(
 
   if (opts.include_stream_key) {
     if (c.username.toLowerCase() === "djsparkz" || c.channel_id === "nsU1v44XFnN3FloJvNePqj6cBG2" || c.user_uid === "nsU1v44XFnN3FloJvNePqj6cBG2") {
-      out.stream_key = c.stream_key || "sk_djsparkz_permanent_key";
+      out.stream_key = c.stream_key || "051f-k58u-670m-ydfj";
       out.rtmp_url = "rtmp://rtmp.livepeer.com/live";
       out.livepeer_stream_id = "1bd59085-a056-431c-96d9-2dcbe8b0919f";
     } else {
@@ -818,8 +824,8 @@ async function getOrRestoreUserChannel(user: UserDoc): Promise<ChannelDoc> {
         photo_url: user.photo_url || null,
         thumbnail_url: null,
         livepeer_stream_id: "1bd59085-a056-431c-96d9-2dcbe8b0919f",
-        stream_key: "sk_djsparkz_permanent_key",
-        playback_id: "1bd5ebt87mygajis",
+        stream_key: "051f-k58u-670m-ydfj",
+        playback_id: "051fkj9ynhu2qk6",
         stream_title: "djsparkz's Live Stream",
         category: "music",
         is_live: false,
@@ -833,9 +839,10 @@ async function getOrRestoreUserChannel(user: UserDoc): Promise<ChannelDoc> {
       await syncChannelToFirestore(chan).catch(() => {});
     } else {
       // Force single source of truth for active stream details on any cache/memory read
-      if (chan.playback_id !== "1bd5ebt87mygajis" || chan.livepeer_stream_id !== "1bd59085-a056-431c-96d9-2dcbe8b0919f") {
-        chan.playback_id = "1bd5ebt87mygajis";
+      if (chan.playback_id !== "051fkj9ynhu2qk6" || chan.livepeer_stream_id !== "1bd59085-a056-431c-96d9-2dcbe8b0919f" || chan.stream_key !== "051f-k58u-670m-ydfj") {
+        chan.playback_id = "051fkj9ynhu2qk6";
         chan.livepeer_stream_id = "1bd59085-a056-431c-96d9-2dcbe8b0919f";
+        chan.stream_key = "051f-k58u-670m-ydfj";
         db.channels.set(chan.channel_id, chan);
         await syncChannelToFirestore(chan).catch(() => {});
       }
@@ -1156,8 +1163,8 @@ async function startServer() {
           photo_url: null,
           thumbnail_url: null,
           livepeer_stream_id: "1bd59085-a056-431c-96d9-2dcbe8b0919f",
-          stream_key: "sk_djsparkz_permanent_key",
-          playback_id: "1bd5ebt87mygajis",
+          stream_key: "051f-k58u-670m-ydfj",
+          playback_id: "051fkj9ynhu2qk6",
           stream_title: "djsparkz's Live Stream",
           category: "music",
           is_live: true,

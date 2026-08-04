@@ -4,22 +4,86 @@ import axios from "axios";
 export function getAbsoluteOrigin() {
   if (typeof window === "undefined" || !window.location) return "";
   
+  const hostname = (window.location.hostname || "").toLowerCase();
+  if (hostname === "localhost" || hostname === "127.0.0.1") {
+    return "";
+  }
+  
+  // Try parsing from window.location.href
+  if (window.location.href && !window.location.href.startsWith("about:") && !window.location.href.startsWith("blob:")) {
+    try {
+      const u = new URL(window.location.href);
+      if (u.origin && u.origin !== "null") {
+        const uHostname = u.hostname.toLowerCase();
+        if (uHostname === "localhost" || uHostname === "127.0.0.1") {
+          return "";
+        }
+        const isAiStudioUrl = 
+          uHostname.endsWith("google.com") || 
+          uHostname.endsWith("ai.studio") || 
+          uHostname.endsWith("google.cn");
+        if (!isAiStudioUrl) {
+          return u.origin;
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   let origin = window.location.origin;
-  if (origin && origin !== "null") return origin;
+  if (origin && origin !== "null") {
+    try {
+      const oUrl = new URL(origin);
+      const oHostname = oUrl.hostname.toLowerCase();
+      if (oHostname === "localhost" || oHostname === "127.0.0.1") {
+        return "";
+      }
+      const isAiStudioUrl = 
+        oHostname.endsWith("google.com") || 
+        oHostname.endsWith("ai.studio") || 
+        oHostname.endsWith("google.cn");
+      if (!isAiStudioUrl) {
+        return origin;
+      }
+    } catch {
+      // ignore
+    }
+  }
   
   // Try building from protocol and host
   const protocol = window.location.protocol;
   const host = window.location.host;
   if (protocol && host && protocol !== "file:" && host !== "") {
-    return `${protocol}//${host}`;
+    const hostLower = host.toLowerCase();
+    if (hostLower.startsWith("localhost") || hostLower.startsWith("127.0.0.1")) {
+      return "";
+    }
+    const isAiStudioUrl = 
+      hostLower.endsWith("google.com") || 
+      hostLower.endsWith("ai.studio") || 
+      hostLower.endsWith("google.cn");
+    if (!isAiStudioUrl) {
+      return `${protocol}//${host}`;
+    }
   }
   
-  // Try parsing from document.referrer
+  // Try parsing from document.referrer, but ONLY if it is not an AI Studio/Google parent domain
   if (typeof document !== "undefined" && document.referrer) {
     try {
       const refUrl = new URL(document.referrer);
       if (refUrl.origin && refUrl.origin !== "null") {
-        return refUrl.origin;
+        const refHostname = refUrl.hostname.toLowerCase();
+        if (refHostname === "localhost" || refHostname === "127.0.0.1") {
+          return "";
+        }
+        const isAiStudio = 
+          refHostname.endsWith("google.com") || 
+          refHostname.endsWith("ai.studio") || 
+          refHostname.endsWith("google.cn");
+        if (!isAiStudio) {
+          return refUrl.origin;
+        }
       }
     } catch {
       // ignore
