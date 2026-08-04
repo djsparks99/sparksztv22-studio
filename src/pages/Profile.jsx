@@ -20,7 +20,16 @@ export default function Profile() {
     if (user) {
       setDisplayName(user.display_name || "");
       setBio(user.bio || "");
-      api.get("/channels/mine")
+      api.get("/channels/mine", {
+        params: {
+          uid: user.uid,
+          username: user.username
+        },
+        headers: {
+          "x-user-uid": user.uid || "",
+          "x-username": user.username || ""
+        }
+      })
         .then(({ data }) => setChannel(data))
         .catch(() => {});
     }

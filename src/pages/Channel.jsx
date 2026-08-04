@@ -54,8 +54,20 @@ export default function Channel() {
 
     // First fetch via API
     const load = async () => {
+      if (!username || username === "undefined" || username === "null") {
+        return;
+      }
       try {
-        const { data } = await api.get(`/channels/${username}`);
+        const { data } = await api.get(`/channels/${username}`, {
+          params: {
+            uid: user?.uid || "",
+            username: user?.username || ""
+          },
+          headers: {
+            "x-user-uid": user?.uid || "",
+            "x-username": user?.username || ""
+          }
+        });
         if (!cancelled) setChannel(data);
       } catch {
         if (!cancelled) setNotFound(true);

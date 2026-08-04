@@ -46,7 +46,16 @@ export default function Dashboard() {
     try {
       setLoading(true);
       setError(null);
-      const { data } = await api.get("/channels/mine");
+      const { data } = await api.get("/channels/mine", {
+        params: {
+          uid: user.uid,
+          username: user.username
+        },
+        headers: {
+          "x-user-uid": user.uid || "",
+          "x-username": user.username || ""
+        }
+      });
       if (data) {
         setChannel(data);
         setTitle(data.stream_title || "");
@@ -78,7 +87,16 @@ export default function Dashboard() {
   useEffect(() => {
     const t = setInterval(() => {
       api
-        .get("/channels/mine")
+        .get("/channels/mine", {
+          params: {
+            uid: user.uid,
+            username: user.username
+          },
+          headers: {
+            "x-user-uid": user.uid || "",
+            "x-username": user.username || ""
+          }
+        })
         .then(({ data }) => {
           if (!data) return;
           setChannel((prev) => {
