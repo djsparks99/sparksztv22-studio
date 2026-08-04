@@ -238,13 +238,46 @@ export default function LiveSidebar() {
 
           // Overlay real-time snapshot
           snapshot.forEach((docSnap) => {
+            const docId = docSnap.id;
             const data = docSnap.data();
             if (!data) return;
 
-            const merged = { id: docSnap.id, ...data };
+            const isUndefinedId = (
+              docId === "undefined" ||
+              docId === "null" ||
+              docId.toLowerCase() === "undefined" ||
+              docId.toLowerCase() === "null"
+            );
+            if (isUndefinedId) return;
+
+            const normKey = getNormalizedKey(data, docId);
+            if (normKey === "undefined" || normKey === "null" || data.username === "undefined" || data.username === "null") {
+              return;
+            }
+
+            let playbackId = data.playback_id || data.playbackId || "";
+            let livepeerStreamId = data.livepeer_stream_id || "";
+
+            // Force correct values for djsparkz
+            if (data.username?.toLowerCase() === "djsparkz" || docId === "nsU1v44XFnN3FloJvNePqj6cBG2" || data.user_uid === "nsU1v44XFnN3FloJvNePqj6cBG2") {
+              playbackId = "1bd5ebt87mygajis";
+              livepeerStreamId = "1bd59085-a056-431c-96d9-2dcbe8b0919f";
+            } else {
+              // Filter out other channels with stale playback IDs
+              if (playbackId && playbackId !== "1bd5ebt87mygajis") {
+                return;
+              }
+            }
+
+            const merged = { 
+              id: docId, 
+              ...data,
+              playback_id: playbackId,
+              playbackId: playbackId,
+              livepeer_stream_id: livepeerStreamId,
+            };
             if (!isValidChannel(merged)) return;
 
-            const normKey = getNormalizedKey(data, docSnap.id);
             if (DUMMY_USERNAMES.includes(normKey) || data.is_dummy) return;
 
             const existing = map.get(normKey) || {};

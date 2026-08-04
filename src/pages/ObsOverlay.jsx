@@ -2,10 +2,10 @@ import { useEffect, useState, useRef } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Heart, Sparkles, Volume2, VolumeX, Radio, Flame, ShieldAlert, Award } from "lucide-react";
-import { BACKEND } from "@/lib/api";
+import { BACKEND, getAbsoluteOrigin } from "@/lib/api";
 
 function wsUrl(username) {
-  const httpUrl = BACKEND || window.location.origin;
+  const httpUrl = BACKEND || getAbsoluteOrigin() || window.location.origin;
   const wsBase = httpUrl.replace(/^http/i, "ws");
   return `${wsBase}/api/ws/chat/${encodeURIComponent(username)}?token=guest&guest_name=OBS_Overlay`;
 }

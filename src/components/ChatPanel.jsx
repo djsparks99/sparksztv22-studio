@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { getToken, setToken, fileUrl, BACKEND, api } from "@/lib/api";
+import { getToken, setToken, fileUrl, BACKEND, api, getAbsoluteOrigin } from "@/lib/api";
 import { auth } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import { Send, LogIn, User, Smile, Zap, Crown, Shield, Gem, Sparkles, X, Flame } from "lucide-react";
 import { Link } from "react-router-dom";
 
 function wsUrl(username, token, guestName = "") {
-  const httpUrl = BACKEND || window.location.origin;
+  const httpUrl = BACKEND || getAbsoluteOrigin() || window.location.origin;
   const wsBase = httpUrl.replace(/^http/i, "ws");
   const query = `token=${encodeURIComponent(token)}${guestName ? `&guest_name=${encodeURIComponent(guestName)}` : ""}`;
   return `${wsBase}/api/ws/chat/${encodeURIComponent(username)}?${query}`;
@@ -130,9 +130,15 @@ export default function ChatPanel({ username }) {
 
   // Connect to WebSocket chat room
   useEffect(() => {
+    if (!username) return;
     let active = true;
+    let ws = null;
+    let reconnectTimeout = null;
+    let retryCount = 0;
 
     const connect = async () => {
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      
       let token = getToken();
       if (!token && user && auth?.currentUser) {
         try {
@@ -145,11 +151,45 @@ export default function ChatPanel({ username }) {
       token = token || "guest";
       if (!active) return;
 
-      const ws = new WebSocket(wsUrl(username, token, !user ? guestName : ""));
+      const url = wsUrl(username, token, !user ? guestName : "");
+      console.log(`[WS] Connecting to chat room: ${url}`);
+      ws = new WebSocket(url);
       wsRef.current = ws;
-      ws.onopen = () => active && setConnected(true);
-      ws.onclose = () => active && setConnected(false);
-      ws.onerror = () => active && setConnected(false);
+
+      ws.onopen = () => {
+        if (!active) {
+          ws.close();
+          return;
+        }
+        console.log("[WS] Connected successfully to chat");
+        setConnected(true);
+        retryCount = 0; // reset retry count on successful connection
+      };
+
+      ws.onclose = (event) => {
+        if (!active) return;
+        setConnected(false);
+        wsRef.current = null;
+        
+        // Calculate backoff time: start at 1s, double up to 10s
+        const backoff = Math.min(10000, 1000 * Math.pow(2, retryCount));
+        retryCount++;
+        console.warn(`[WS] Connection closed. Reconnecting in ${backoff}ms...`, event);
+        
+        reconnectTimeout = setTimeout(() => {
+          if (active) connect();
+        }, backoff);
+      };
+
+      ws.onerror = (err) => {
+        console.error("[WS] Connection error:", err);
+        if (ws) {
+          try {
+            ws.close();
+          } catch {}
+        }
+      };
+
       ws.onmessage = (ev) => {
         if (!active) return;
         try {
@@ -230,10 +270,13 @@ export default function ChatPanel({ username }) {
 
     return () => {
       active = false;
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      if (ws) {
+        try {
+          ws.close();
+        } catch {}
       }
+      wsRef.current = null;
     };
   }, [username, user, guestName]);
 

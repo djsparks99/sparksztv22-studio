@@ -77,7 +77,9 @@ export default function HlsPlayer({
   const togglePlay = () => {
     if (!videoRef.current) return;
     if (videoRef.current.paused) {
-      videoRef.current.play();
+      videoRef.current.play().catch(e => {
+        console.warn("HLS video playback failed:", e);
+      });
       setIsPlaying(true);
     } else {
       videoRef.current.pause();

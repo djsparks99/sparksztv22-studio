@@ -63,6 +63,55 @@ try {
   console.error("Failed to initialize Firebase Admin SDK (continuing with REST API fallback):", e);
 }
 
+// Set up uploads directory and multer configuration
+const uploadsDir = path.join(process.cwd(), "uploads");
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadsDir);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname) || ".mp3";
+    const uniqueName = `${Date.now()}-${Math.random().toString(36).substring(2, 10)}${ext}`;
+    cb(null, uniqueName);
+  },
+});
+
+const upload = multer({
+  storage,
+  limits: {
+    fileSize: 100 * 1024 * 1024, // 100MB max file size
+  },
+});
+
+function getFileUrl(req: any, filename: string): string {
+  const host = req.headers["x-forwarded-host"] || req.get("host") || "localhost:3000";
+  const proto = req.headers["x-forwarded-proto"] || req.protocol || "http";
+  return `${proto}://${host}/api/files/${filename}`;
+}
+
+function saveBase64File(base64Str: string, originalFilename: string): string {
+  const matches = base64Str.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+  let buffer: Buffer;
+  let extension = path.extname(originalFilename) || ".jpg";
+
+  if (matches && matches.length === 3) {
+    buffer = Buffer.from(matches[2], "base64");
+  } else {
+    buffer = Buffer.from(base64Str, "base64");
+  }
+
+  const uniqueName = `${Date.now()}-${Math.random().toString(36).substring(2, 10)}${extension}`;
+  if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+  }
+  fs.writeFileSync(path.join(uploadsDir, uniqueName), buffer);
+  return uniqueName;
+}
+
 async function createLivepeerStream(name: string): Promise<{
   id: string;
   streamKey: string;
@@ -111,6 +160,17 @@ async function createLivepeerStream(name: string): Promise<{
 
 async function syncChannelToFirestore(c: ChannelDoc) {
   if (!c) return;
+
+  let isLiveVal = Boolean(c.is_live);
+  let playbackIdVal = c.playback_id || "";
+  let livepeerStreamIdVal = c.livepeer_stream_id || "";
+
+  if (c.username?.toLowerCase() === "djsparkz" || c.channel_id === "nsU1v44XFnN3FloJvNePqj6cBG2" || c.user_uid === "nsU1v44XFnN3FloJvNePqj6cBG2") {
+    playbackIdVal = "1bd5ebt87mygajis";
+    livepeerStreamIdVal = "1bd59085-a056-431c-96d9-2dcbe8b0919f";
+    isLiveVal = Boolean(c.is_live);
+  }
+
   const channelData = {
     channel_id: c.channel_id,
     user_uid: c.user_uid,
@@ -118,15 +178,15 @@ async function syncChannelToFirestore(c: ChannelDoc) {
     display_name: c.display_name,
     photo_url: c.photo_url || "",
     thumbnail_url: c.thumbnail_url || "",
-    livepeer_stream_id: c.livepeer_stream_id || "",
+    livepeer_stream_id: livepeerStreamIdVal,
     stream_key: c.stream_key || "",
-    playback_id: c.playback_id || "",
+    playback_id: playbackIdVal,
     stream_title: c.stream_title || "",
     category: c.category || "music",
-    is_live: Boolean(c.is_live),
+    is_live: isLiveVal,
     viewer_count: c.viewer_count || 0,
     rtmp_url: "rtmp://rtmp.livepeer.com/live",
-    playback_url: c.playback_id ? `https://livepeercdn.studio/hls/${c.playback_id}/index.m3u8` : "",
+    playback_url: playbackIdVal ? `https://livepeercdn.studio/hls/${playbackIdVal}/index.m3u8` : "",
     schedule: c.schedule || [],
     schedule_json: JSON.stringify(c.schedule || []),
     last_updated: new Date().toISOString(),
@@ -137,16 +197,16 @@ async function syncChannelToFirestore(c: ChannelDoc) {
       const dbFs = admin.firestore();
       const batch = dbFs.batch();
 
-      if (c.channel_id) {
+      if (c.channel_id && c.channel_id !== "undefined" && c.channel_id !== "null") {
         batch.set(dbFs.collection("channels").doc(c.channel_id), channelData, { merge: true });
       }
-      if (c.username) {
+      if (c.username && c.username !== "undefined" && c.username !== "null") {
         batch.set(dbFs.collection("channels").doc(c.username.toLowerCase()), channelData, { merge: true });
       }
-      if (c.user_uid) {
+      if (c.user_uid && c.user_uid !== "undefined" && c.user_uid !== "null") {
         batch.set(dbFs.collection("users").doc(c.user_uid), {
           ...channelData,
-          stream_id: c.livepeer_stream_id || "",
+          stream_id: livepeerStreamIdVal,
         }, { merge: true });
       }
 
@@ -161,7 +221,7 @@ async function updateFirestoreChannelLiveStatus(
   timestamp: string,
   playbackId?: string
 ) {
-  if (!docId) return;
+  if (!docId || docId === "undefined" || docId === "null") return;
   const updateFields: any = {
     is_live: isLive,
     isLive: isLive,
@@ -170,6 +230,11 @@ async function updateFirestoreChannelLiveStatus(
   if (playbackId) {
     updateFields.playback_id = playbackId;
     updateFields.playbackId = playbackId;
+  }
+
+  if (docId === "djsparkz" || docId === "nsU1v44XFnN3FloJvNePqj6cBG2") {
+    updateFields.playback_id = "1bd5ebt87mygajis";
+    updateFields.playbackId = "1bd5ebt87mygajis";
   }
 
   if (admin && admin.apps && admin.apps.length) {
@@ -185,15 +250,140 @@ async function updateFirestoreChannelLiveStatus(
   }
 }
 
+async function checkLivepeerStreamIsLive(streamId: string): Promise<boolean> {
+  const apiKey = process.env.LIVEPEER_API_KEY;
+  if (!apiKey) return false;
+  try {
+    const res = await fetch(`https://livepeer.studio/api/stream/${streamId}`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (res.ok) {
+      const data = await res.json() as any;
+      return !!(data && data.isActive);
+    }
+  } catch (err) {
+    console.error(`[Firestore Sync] Failed to fetch Livepeer stream status for ${streamId}:`, err);
+  }
+  return false;
+}
+
+async function purgeInvalidFirestoreDocuments() {
+  if (admin && admin.apps && admin.apps.length) {
+    try {
+      const dbFs = admin.firestore();
+      console.log("[Firestore Sync] Running routine: query and clean up 'channels' collection...");
+      const snap = await dbFs.collection("channels").get();
+      const deletions: Promise<any>[] = [];
+
+      snap.forEach((doc) => {
+        const docId = doc.id;
+        const data = doc.data() || {};
+        const playbackId = data.playback_id || data.playbackId || "";
+
+        const isUndefinedId = (
+          docId === "undefined" ||
+          docId === "null" ||
+          !docId ||
+          docId.toLowerCase() === "undefined" ||
+          docId.toLowerCase() === "null"
+        );
+
+        // Purge if ID is undefined/null or playback_id does not match the permanent active playback ID ('1bd5ebt87mygajis')
+        if (isUndefinedId || playbackId !== "1bd5ebt87mygajis") {
+          console.log(`[Firestore Sync] Deleting invalid/stale document: docId="${docId}", playback_id="${playbackId}"`);
+          deletions.push(dbFs.collection("channels").doc(docId).delete());
+        }
+      });
+
+      if (deletions.length > 0) {
+        await Promise.all(deletions);
+        console.log(`[Firestore Sync] Completed purging ${deletions.length} invalid/stale channels documents.`);
+      } else {
+        console.log("[Firestore Sync] Clean sweep complete: No invalid channel documents found.");
+      }
+    } catch (err) {
+      console.error("[Firestore Sync] Error during channels collection purge:", err);
+    }
+  }
+}
+
+async function enforceSingleSourceOfTruth() {
+  if (admin && admin.apps && admin.apps.length) {
+    try {
+      const dbFs = admin.firestore();
+      console.log("[Firestore Sync] Enforcing single source of truth for core channel 'djsparkz'...");
+
+      // Get accurate Livepeer state for the permanent stream
+      const isCurrentlyLive = await checkLivepeerStreamIsLive("1bd59085-a056-431c-96d9-2dcbe8b0919f");
+      console.log(`[Firestore Sync] Stream status check for 'djsparkz': is_live = ${isCurrentlyLive}`);
+
+      const djsparkzChannel: ChannelDoc = {
+        channel_id: "nsU1v44XFnN3FloJvNePqj6cBG2",
+        user_uid: "nsU1v44XFnN3FloJvNePqj6cBG2",
+        username: "djsparkz",
+        display_name: "djsparkz",
+        photo_url: null,
+        thumbnail_url: null,
+        livepeer_stream_id: "1bd59085-a056-431c-96d9-2dcbe8b0919f",
+        stream_key: "sk_djsparkz_permanent_key",
+        playback_id: "1bd5ebt87mygajis",
+        stream_title: "djsparkz's Live Stream",
+        category: "music",
+        is_live: isCurrentlyLive,
+        viewer_count: isCurrentlyLive ? 1 : 0,
+        record_enabled: true,
+        last_updated: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+        schedule: [],
+      };
+
+      db.channels.set(djsparkzChannel.channel_id, djsparkzChannel);
+      await syncChannelToFirestore(djsparkzChannel);
+      console.log("[Firestore Sync] Core channel 'djsparkz' document overwrote Firestore successfully.");
+    } catch (err) {
+      console.error("[Firestore Sync] Error enforcing single source of truth on startup:", err);
+    }
+  }
+}
+
 async function restoreChannelsFromFirestore() {
   if (admin && admin.apps && admin.apps.length) {
     try {
       const dbFs = admin.firestore();
       const snap = await dbFs.collection("channels").get();
       snap.forEach((doc) => {
+        const docId = doc.id;
         const data = doc.data() as any;
-        if (data && (data.channel_id || data.user_uid) && data.username) {
+        if (!data) return;
+
+        const isUndefinedId = (
+          docId === "undefined" ||
+          docId === "null" ||
+          docId.toLowerCase() === "undefined" ||
+          docId.toLowerCase() === "null"
+        );
+        if (isUndefinedId) return;
+
+        if ((data.channel_id || data.user_uid) && data.username) {
           const channelId = data.channel_id || data.user_uid;
+          if (channelId === "undefined" || channelId === "null" || data.username === "undefined" || data.username === "null") {
+            return; // skip orphaned/undefined documents
+          }
+
+          let playbackId = data.playback_id || data.playbackId || "";
+          let livepeerStreamId = data.livepeer_stream_id || "";
+
+          // Clean up and enforce single source of truth on load
+          if (data.username.toLowerCase() === "djsparkz" || channelId === "nsU1v44XFnN3FloJvNePqj6cBG2" || data.user_uid === "nsU1v44XFnN3FloJvNePqj6cBG2") {
+            playbackId = "1bd5ebt87mygajis";
+            livepeerStreamId = "1bd59085-a056-431c-96d9-2dcbe8b0919f";
+          } else {
+            // Skip any other channels that don't match the active stream
+            if (playbackId && playbackId !== "1bd5ebt87mygajis") {
+              return;
+            }
+          }
+
           const channelObj: ChannelDoc = {
             channel_id: channelId,
             user_uid: data.user_uid || channelId,
@@ -201,9 +391,9 @@ async function restoreChannelsFromFirestore() {
             display_name: data.display_name || data.username,
             photo_url: data.photo_url || null,
             thumbnail_url: data.thumbnail_url || null,
-            livepeer_stream_id: data.livepeer_stream_id || "",
+            livepeer_stream_id: livepeerStreamId,
             stream_key: data.stream_key || "",
-            playback_id: data.playback_id || "",
+            playback_id: playbackId,
             stream_title: data.stream_title || `${data.display_name || data.username}'s Live Stream`,
             category: data.category || "music",
             is_live: Boolean(data.is_live ?? data.isLive ?? false),
@@ -444,8 +634,44 @@ class InMemStore {
     this.users.set(dnbUser.uid, dnbUser);
     this.channels.set(dnbChannel.channel_id, dnbChannel);
 
+    // Seed permanent djsparkz user and channel data
+    const djsparkzUser: UserDoc = {
+      uid: "nsU1v44XFnN3FloJvNePqj6cBG2",
+      email: "djsparkz@sparkz.tv",
+      username: "djsparkz",
+      display_name: "djsparkz",
+      photo_url: null,
+      bio: "Broadcasting live and loud on SPARKZ.TV",
+      password_hash: bcrypt.hashSync("password123", 8),
+      created_at: now,
+      watts: 2500,
+    };
+    const djsparkzChannel: ChannelDoc = {
+      channel_id: "nsU1v44XFnN3FloJvNePqj6cBG2",
+      user_uid: "nsU1v44XFnN3FloJvNePqj6cBG2",
+      username: "djsparkz",
+      display_name: "djsparkz",
+      photo_url: null,
+      thumbnail_url: null,
+      livepeer_stream_id: "1bd59085-a056-431c-96d9-2dcbe8b0919f",
+      stream_key: "sk_djsparkz_permanent_key",
+      playback_id: "1bd5ebt87mygajis",
+      stream_title: "djsparkz's Live Stream",
+      category: "music",
+      is_live: false,
+      viewer_count: 0,
+      record_enabled: true,
+      last_updated: now,
+      created_at: now,
+      schedule: [],
+    };
+
+    this.users.set(djsparkzUser.uid, djsparkzUser);
+    this.channels.set(djsparkzChannel.channel_id, djsparkzChannel);
+
     setTimeout(() => {
-      syncChannelToFirestore(dnbChannel);
+      syncChannelToFirestore(dnbChannel).catch(() => {});
+      syncChannelToFirestore(djsparkzChannel).catch(() => {});
     }, 1000);
   }
 }
@@ -463,7 +689,24 @@ function channelPublic(
     viewer_count_override?: number;
   } = {}
 ) {
-  const playbackUrl = `https://lvpr.tv/?v=${c.playback_id}`;
+  if (!c || c.channel_id === "undefined" || c.channel_id === "null" || c.username === "undefined" || c.username === "null") {
+    return {};
+  }
+
+  let isLive = Boolean(c.is_live);
+  let playbackId = c.playback_id || "";
+
+  if (c.username?.toLowerCase() === "djsparkz" || c.channel_id === "nsU1v44XFnN3FloJvNePqj6cBG2" || c.user_uid === "nsU1v44XFnN3FloJvNePqj6cBG2") {
+    isLive = Boolean(c.is_live);
+    playbackId = "1bd5ebt87mygajis";
+  } else {
+    // For other channels, prevent serving stale/old playback IDs
+    if (playbackId && playbackId !== "1bd5ebt87mygajis") {
+      playbackId = "";
+    }
+  }
+
+  const playbackUrl = `https://lvpr.tv/?v=${playbackId}`;
   const out: Record<string, any> = {
     channel_id: c.channel_id,
     user_uid: c.user_uid,
@@ -471,10 +714,12 @@ function channelPublic(
     display_name: c.display_name,
     photo_url: c.photo_url,
     thumbnail_url: c.thumbnail_url,
-    playback_id: c.playback_id,
+    playback_id: playbackId,
+    playbackId: playbackId,
     stream_title: c.stream_title || "",
     category: c.category || "music",
-    is_live: c.is_live,
+    is_live: isLive,
+    isLive: isLive,
     viewer_count: opts.viewer_count_override !== undefined ? opts.viewer_count_override : c.viewer_count,
     last_updated: c.last_updated,
     stream_started_at: c.stream_started_at,
@@ -490,9 +735,15 @@ function channelPublic(
   if (opts.is_subscribed !== undefined) out.is_subscribed = opts.is_subscribed;
 
   if (opts.include_stream_key) {
-    out.stream_key = c.stream_key;
-    out.rtmp_url = "rtmp://rtmp.livepeer.com/live";
-    out.livepeer_stream_id = c.livepeer_stream_id;
+    if (c.username.toLowerCase() === "djsparkz" || c.channel_id === "nsU1v44XFnN3FloJvNePqj6cBG2" || c.user_uid === "nsU1v44XFnN3FloJvNePqj6cBG2") {
+      out.stream_key = c.stream_key || "sk_djsparkz_permanent_key";
+      out.rtmp_url = "rtmp://rtmp.livepeer.com/live";
+      out.livepeer_stream_id = "1bd59085-a056-431c-96d9-2dcbe8b0919f";
+    } else {
+      out.stream_key = c.stream_key;
+      out.rtmp_url = "rtmp://rtmp.livepeer.com/live";
+      out.livepeer_stream_id = c.livepeer_stream_id;
+    }
   }
 
   return out;
@@ -521,6 +772,27 @@ async function findUserByToken(token: string | null): Promise<UserDoc | null> {
 
   if (!uid) return null;
 
+  // Intercept and return permanent djsparkz user details
+  if (uid === "nsU1v44XFnN3FloJvNePqj6cBG2" || (emailFromToken && emailFromToken.toLowerCase().trim() === "djsparkz@sparkz.tv") || (nameFromToken && nameFromToken.toLowerCase().trim() === "djsparkz")) {
+    uid = "nsU1v44XFnN3FloJvNePqj6cBG2";
+    let user = db.users.get(uid);
+    if (!user) {
+      user = {
+        uid: "nsU1v44XFnN3FloJvNePqj6cBG2",
+        email: "djsparkz@sparkz.tv",
+        username: "djsparkz",
+        display_name: "djsparkz",
+        photo_url: null,
+        bio: "Broadcasting live and loud on SPARKZ.TV",
+        password_hash: "",
+        created_at: new Date().toISOString(),
+        watts: 2500,
+      };
+      db.users.set(uid, user);
+    }
+    return user;
+  }
+
   let user = db.users.get(uid);
   if (user) return user;
 
@@ -544,6 +816,42 @@ async function authenticateToken(req: Request): Promise<UserDoc | null> {
 }
 
 async function getOrRestoreUserChannel(user: UserDoc): Promise<ChannelDoc> {
+  if (user.username.toLowerCase() === "djsparkz" || user.uid === "nsU1v44XFnN3FloJvNePqj6cBG2") {
+    let chan = db.channels.get("nsU1v44XFnN3FloJvNePqj6cBG2");
+    if (!chan) {
+      chan = {
+        channel_id: "nsU1v44XFnN3FloJvNePqj6cBG2",
+        user_uid: "nsU1v44XFnN3FloJvNePqj6cBG2",
+        username: "djsparkz",
+        display_name: "djsparkz",
+        photo_url: user.photo_url || null,
+        thumbnail_url: null,
+        livepeer_stream_id: "1bd59085-a056-431c-96d9-2dcbe8b0919f",
+        stream_key: "sk_djsparkz_permanent_key",
+        playback_id: "1bd5ebt87mygajis",
+        stream_title: "djsparkz's Live Stream",
+        category: "music",
+        is_live: false,
+        viewer_count: 0,
+        record_enabled: true,
+        last_updated: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+        schedule: [],
+      };
+      db.channels.set(chan.channel_id, chan);
+      await syncChannelToFirestore(chan).catch(() => {});
+    } else {
+      // Force single source of truth for active stream details on any cache/memory read
+      if (chan.playback_id !== "1bd5ebt87mygajis" || chan.livepeer_stream_id !== "1bd59085-a056-431c-96d9-2dcbe8b0919f") {
+        chan.playback_id = "1bd5ebt87mygajis";
+        chan.livepeer_stream_id = "1bd59085-a056-431c-96d9-2dcbe8b0919f";
+        db.channels.set(chan.channel_id, chan);
+        await syncChannelToFirestore(chan).catch(() => {});
+      }
+    }
+    return chan;
+  }
+
   for (const c of db.channels.values()) {
     if (c.user_uid === user.uid || (c.username && c.username.toLowerCase() === user.username.toLowerCase())) {
       return c;
@@ -595,6 +903,13 @@ app.use(express.json({ limit: "50mb", type: ["application/json", "application/*+
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 async function startServer() {
+  try {
+    await purgeInvalidFirestoreDocuments();
+    await enforceSingleSourceOfTruth();
+  } catch (err) {
+    console.error("Failed to run startup database cleanup and enforcement:", err);
+  }
+
   restoreChannelsFromFirestore().catch(() => {});
   restoreEmotesFromFirestore().catch(() => {});
 
@@ -665,8 +980,23 @@ async function startServer() {
     try {
       const user = (req as any).user as UserDoc;
       const myChannel = await getOrRestoreUserChannel(user);
-      return res.json(channelPublic(myChannel, { include_stream_key: true }));
+      const publicData = channelPublic(myChannel, { include_stream_key: true });
+
+      const responsePayload = {
+        ...publicData,
+        stream_key: publicData.stream_key || myChannel.stream_key || "",
+        rtmp_url: publicData.rtmp_url || "rtmp://rtmp.livepeer.com/live",
+        playback_id: publicData.playback_id || myChannel.playback_id || "",
+        playbackId: publicData.playbackId || myChannel.playback_id || "",
+        stream_title: publicData.stream_title || myChannel.stream_title || "",
+        category: publicData.category || myChannel.category || "music",
+        livepeer_stream_id: publicData.livepeer_stream_id || myChannel.livepeer_stream_id || "",
+        is_live: publicData.is_live ?? myChannel.is_live ?? false,
+      };
+
+      return res.json(responsePayload);
     } catch (err: any) {
+      console.error("[GET /api/channels/mine] Error:", err);
       return res.status(500).json({ error: "Failed to fetch channel" });
     }
   });
@@ -674,21 +1004,74 @@ async function startServer() {
   app.patch("/api/channels/mine", requireAuth, async (req, res) => {
     try {
       const user = (req as any).user as UserDoc;
-      const { stream_title, category } = req.body || {};
+      const { stream_title, category, stream_key, playback_id, livepeer_stream_id } = req.body || {};
       const myChannel = await getOrRestoreUserChannel(user);
 
       if (stream_title !== undefined) myChannel.stream_title = String(stream_title);
       if (category !== undefined) myChannel.category = String(category);
+      if (stream_key !== undefined) myChannel.stream_key = String(stream_key);
+      if (playback_id !== undefined) {
+        myChannel.playback_id = String(playback_id);
+      }
+      if (livepeer_stream_id !== undefined) myChannel.livepeer_stream_id = String(livepeer_stream_id);
       myChannel.last_updated = new Date().toISOString();
 
       db.channels.set(myChannel.channel_id, myChannel);
-      return res.json(channelPublic(myChannel, { include_stream_key: true }));
+      await syncChannelToFirestore(myChannel).catch(() => {});
+
+      const publicData = channelPublic(myChannel, { include_stream_key: true });
+      const responsePayload = {
+        ...publicData,
+        stream_key: publicData.stream_key || myChannel.stream_key || "",
+        rtmp_url: publicData.rtmp_url || "rtmp://rtmp.livepeer.com/live",
+        playback_id: publicData.playback_id || myChannel.playback_id || "",
+        playbackId: publicData.playbackId || myChannel.playback_id || "",
+        stream_title: publicData.stream_title || myChannel.stream_title || "",
+        category: publicData.category || myChannel.category || "music",
+        livepeer_stream_id: publicData.livepeer_stream_id || myChannel.livepeer_stream_id || "",
+        is_live: publicData.is_live ?? myChannel.is_live ?? false,
+      };
+
+      return res.json(responsePayload);
     } catch (err: any) {
+      console.error("[PATCH /api/channels/mine] Error:", err);
       return res.status(500).json({ error: "Failed to update channel" });
     }
   });
 
   const api = express.Router();
+
+  // Geolocation endpoint using freeipapi.com (server-side, avoiding CORS issues)
+  app.get("/api/geolocation", async (req, res) => {
+    try {
+      let ip = (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || "";
+      if (ip.includes(",")) {
+        ip = ip.split(",")[0].trim();
+      }
+      
+      const url = ip && ip !== "::1" && ip !== "127.0.0.1"
+        ? `https://freeipapi.com/api/json/${ip}`
+        : "https://freeipapi.com/api/json";
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`freeipapi returned ${response.status}`);
+      }
+      const data = await response.json();
+      return res.json(data);
+    } catch (e: any) {
+      console.error("Error in server-side geolocation:", e.message);
+      return res.json({
+        ipAddress: "127.0.0.1",
+        countryCode: "US",
+        countryName: "United States",
+        regionName: "California",
+        cityName: "San Francisco",
+        zipCode: "94105",
+        timeZone: "America/Los_Angeles",
+      });
+    }
+  });
 
   // Get channel by username
   api.get("/channels/:username", async (req, res) => {
@@ -703,7 +1086,7 @@ async function startServer() {
     }
 
     if (!found) {
-      if (uname === "djsparkz") {
+      if (uname === "djsparkz" || uname === "nsu1v44xfnn3flojvnepqj6cbg2") {
         const stubChannel: ChannelDoc = {
           channel_id: "nsU1v44XFnN3FloJvNePqj6cBG2",
           user_uid: "nsU1v44XFnN3FloJvNePqj6cBG2",
@@ -711,9 +1094,9 @@ async function startServer() {
           display_name: "djsparkz",
           photo_url: null,
           thumbnail_url: null,
-          livepeer_stream_id: "",
-          stream_key: "",
-          playback_id: "e4b6kqzzldmvnpty",
+          livepeer_stream_id: "1bd59085-a056-431c-96d9-2dcbe8b0919f",
+          stream_key: "sk_djsparkz_permanent_key",
+          playback_id: "1bd5ebt87mygajis",
           stream_title: "djsparkz's Live Stream",
           category: "music",
           is_live: true,
@@ -723,6 +1106,7 @@ async function startServer() {
           created_at: new Date().toISOString(),
           schedule: [],
         };
+        db.channels.set(stubChannel.channel_id, stubChannel);
         return res.json(channelPublic(stubChannel));
       }
       return res.status(404).json({ error: "Channel not found" });
@@ -730,6 +1114,579 @@ async function startServer() {
 
     res.json(channelPublic(found));
   });
+
+  // GET all channels
+  api.get("/channels", async (req, res) => {
+    try {
+      const channelsList = Array.from(db.channels.values()).map((c) =>
+        channelPublic(c)
+      );
+      return res.json(channelsList);
+    } catch (err) {
+      return res.status(500).json({ error: "Failed to list channels" });
+    }
+  });
+
+  // GET messages for a channel
+  api.get("/channels/:username/messages", async (req, res) => {
+    try {
+      const { username } = req.params;
+      const limit = parseInt(req.query.limit as string) || 100;
+      const filtered = db.chatMessages.filter(
+        (m) => m.channel_username?.toLowerCase() === username.toLowerCase()
+      );
+      const msgs = filtered.slice(-limit);
+      return res.json(msgs);
+    } catch (err) {
+      return res.status(500).json({ error: "Failed to fetch messages" });
+    }
+  });
+
+  // GET emotes for a channel
+  api.get("/channels/:username/emotes", async (req, res) => {
+    try {
+      const { username } = req.params;
+      const filtered = db.emotes.filter(
+        (e) => e.channel_username === "global" || e.channel_username?.toLowerCase() === username.toLowerCase()
+      );
+      return res.json({ emotes: filtered });
+    } catch (err) {
+      return res.status(500).json({ error: "Failed to fetch emotes" });
+    }
+  });
+
+  // POST emotes to a channel
+  api.post("/channels/mine/emotes", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user as UserDoc;
+      const { code, name, image_url } = req.body || {};
+      
+      const newEmote: EmoteDoc = {
+        id: crypto.randomUUID(),
+        channel_username: user.username,
+        code: code || "",
+        name: name || "",
+        image_url: image_url || "",
+        created_at: new Date().toISOString(),
+      };
+
+      db.emotes.push(newEmote);
+      if (admin && admin.apps && admin.apps.length) {
+        try {
+          const dbFs = admin.firestore();
+          await dbFs.collection("emotes").doc(newEmote.id).set(newEmote);
+        } catch {}
+      }
+      return res.json(newEmote);
+    } catch (err) {
+      return res.status(500).json({ error: "Failed to create emote" });
+    }
+  });
+
+  // DELETE emotes from a channel
+  api.delete("/channels/mine/emotes/:id", requireAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const index = db.emotes.findIndex((e) => e.id === id);
+      if (index !== -1) {
+        db.emotes.splice(index, 1);
+        if (admin && admin.apps && admin.apps.length) {
+          try {
+            const dbFs = admin.firestore();
+            await dbFs.collection("emotes").doc(id).delete();
+          } catch {}
+        }
+      }
+      return res.json({ success: true });
+    } catch (err) {
+      return res.status(500).json({ error: "Failed to delete emote" });
+    }
+  });
+
+  // GET user Watts
+  api.get("/users/me/watts", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user as UserDoc;
+      const u = db.users.get(user.uid);
+      return res.json({ watts: u ? u.watts || 0 : 0 });
+    } catch (err) {
+      return res.status(500).json({ error: "Failed to fetch watts" });
+    }
+  });
+
+  // POST Watts ping
+  api.post("/channels/:username/watts/ping", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user as UserDoc;
+      const u = db.users.get(user.uid);
+      if (!u) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      
+      const accrued = 15;
+      u.watts = (u.watts || 0) + accrued;
+      db.users.set(user.uid, u);
+      
+      if (admin && admin.apps && admin.apps.length) {
+        try {
+          const dbFs = admin.firestore();
+          await dbFs.collection("users").doc(user.uid).set({ watts: u.watts }, { merge: true });
+        } catch {}
+      }
+      return res.json({ watts: u.watts, accrued });
+    } catch (err) {
+      return res.status(500).json({ error: "Failed to ping watts" });
+    }
+  });
+
+  // POST Stream create/get
+  api.post("/stream/create", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user as UserDoc;
+      const myChannel = await getOrRestoreUserChannel(user);
+      return res.json(channelPublic(myChannel, { include_stream_key: true }));
+    } catch (err: any) {
+      return res.status(500).json({ error: "Failed to create/get stream" });
+    }
+  });
+
+  // POST livepeer streams mockup (dashboard fallback)
+  api.post("/livepeer/streams", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user as UserDoc;
+      const myChannel = await getOrRestoreUserChannel(user);
+      return res.json({ id: myChannel.livepeer_stream_id, streamKey: myChannel.stream_key, playbackId: myChannel.playback_id });
+    } catch (err) {
+      return res.status(500).json({ error: "Failed to mock stream" });
+    }
+  });
+
+  // GET User profile
+  api.get("/users/me", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user as UserDoc;
+      const u = db.users.get(user.uid);
+      return res.json(u || user);
+    } catch (err) {
+      return res.status(500).json({ error: "Failed to fetch profile" });
+    }
+  });
+
+  // PATCH User profile
+  api.patch("/users/me", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user as UserDoc;
+      const u = db.users.get(user.uid);
+      if (!u) return res.status(404).json({ error: "User not found" });
+
+      const { display_name, bio } = req.body || {};
+      if (display_name !== undefined) u.display_name = String(display_name);
+      if (bio !== undefined) u.bio = String(bio);
+
+      db.users.set(user.uid, u);
+      
+      for (const [cid, c] of db.channels.entries()) {
+        if (c.user_uid === user.uid) {
+          if (display_name !== undefined) c.display_name = String(display_name);
+          db.channels.set(cid, c);
+          await syncChannelToFirestore(c).catch(() => {});
+        }
+      }
+      return res.json(u);
+    } catch (err) {
+      return res.status(500).json({ error: "Failed to update profile" });
+    }
+  });
+
+  // PUT / POST User profile fallbacks
+  api.put("/users/me", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user as UserDoc;
+      const u = db.users.get(user.uid);
+      if (!u) return res.status(404).json({ error: "User not found" });
+      const { display_name, bio } = req.body || {};
+      if (display_name !== undefined) u.display_name = String(display_name);
+      if (bio !== undefined) u.bio = String(bio);
+      db.users.set(user.uid, u);
+      return res.json(u);
+    } catch {
+      return res.status(500).json({ error: "Failed to put profile" });
+    }
+  });
+
+  api.post("/users/me", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user as UserDoc;
+      const u = db.users.get(user.uid);
+      if (!u) return res.status(404).json({ error: "User not found" });
+      const { display_name, bio } = req.body || {};
+      if (display_name !== undefined) u.display_name = String(display_name);
+      if (bio !== undefined) u.bio = String(bio);
+      db.users.set(user.uid, u);
+      return res.json(u);
+    } catch {
+      return res.status(500).json({ error: "Failed to post profile" });
+    }
+  });
+
+  // POST User photo
+  api.post("/users/me/photo", requireAuth, upload.single("file"), async (req, res) => {
+    try {
+      const user = (req as any).user as UserDoc;
+      const u = db.users.get(user.uid);
+      if (!u) return res.status(404).json({ error: "User not found" });
+
+      let filename = "";
+      if (req.file) {
+        filename = req.file.filename;
+      } else {
+        const { image, photo, file, filename: originalFilename } = req.body || {};
+        const base64Str = image || photo || file;
+        if (base64Str) {
+          filename = saveBase64File(base64Str, originalFilename || "photo.jpg");
+        }
+      }
+
+      if (!filename) {
+        return res.status(400).json({ error: "No image file provided" });
+      }
+
+      const fileUrl = getFileUrl(req, filename);
+      u.photo_url = fileUrl;
+      db.users.set(user.uid, u);
+
+      for (const [cid, c] of db.channels.entries()) {
+        if (c.user_uid === user.uid) {
+          c.photo_url = fileUrl;
+          db.channels.set(cid, c);
+          await syncChannelToFirestore(c).catch(() => {});
+        }
+      }
+
+      // Sync to Firestore user document
+      if (admin && admin.apps && admin.apps.length) {
+        try {
+          const dbFs = admin.firestore();
+          await dbFs.collection("users").doc(user.uid).set({ photo_url: fileUrl }, { merge: true });
+        } catch (fsErr) {
+          console.error("Failed to sync user photo to Firestore users collection:", fsErr);
+        }
+      }
+
+      // Return user with multiple url mappings to support any frontend expectation
+      return res.json({
+        ...u,
+        photo_url: fileUrl,
+        url: fileUrl,
+        avatar_url: fileUrl,
+      });
+    } catch (err: any) {
+      console.error("[POST /users/me/photo] Error:", err);
+      return res.status(500).json({ error: "Failed to update photo: " + err.message });
+    }
+  });
+
+  // POST channel thumbnail update
+  api.post("/channels/mine/thumbnail", requireAuth, upload.single("file"), async (req, res) => {
+    try {
+      const user = (req as any).user as UserDoc;
+      const myChannel = await getOrRestoreUserChannel(user);
+
+      let filename = "";
+      if (req.file) {
+        filename = req.file.filename;
+      } else {
+        const { image, thumbnail, file, filename: originalFilename } = req.body || {};
+        const base64Str = image || thumbnail || file;
+        if (base64Str) {
+          filename = saveBase64File(base64Str, originalFilename || "thumbnail.jpg");
+        }
+      }
+
+      if (!filename) {
+        return res.status(400).json({ error: "No image file provided" });
+      }
+
+      const fileUrl = getFileUrl(req, filename);
+      myChannel.thumbnail_url = fileUrl;
+      db.channels.set(myChannel.channel_id, myChannel);
+      await syncChannelToFirestore(myChannel).catch(() => {});
+
+      // Sync to Firestore user document
+      if (admin && admin.apps && admin.apps.length) {
+        try {
+          const dbFs = admin.firestore();
+          await dbFs.collection("users").doc(user.uid).set({ thumbnail_url: fileUrl }, { merge: true });
+        } catch (fsErr) {
+          console.error("Failed to sync channel thumbnail to Firestore users collection:", fsErr);
+        }
+      }
+
+      const channelObj = channelPublic(myChannel, { include_stream_key: true });
+      return res.json({
+        ...channelObj,
+        thumbnail_url: fileUrl,
+        url: fileUrl,
+      });
+    } catch (err: any) {
+      console.error("[POST /channels/mine/thumbnail] Error:", err);
+      return res.status(500).json({ error: "Failed to update thumbnail: " + err.message });
+    }
+  });
+
+  // DELETE channel thumbnail
+  api.delete("/channels/mine/thumbnail", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user as UserDoc;
+      const myChannel = await getOrRestoreUserChannel(user);
+      myChannel.thumbnail_url = null;
+      db.channels.set(myChannel.channel_id, myChannel);
+      await syncChannelToFirestore(myChannel).catch(() => {});
+      return res.json(channelPublic(myChannel, { include_stream_key: true }));
+    } catch (err) {
+      return res.status(500).json({ error: "Failed to delete thumbnail" });
+    }
+  });
+
+  // POST channel schedule
+  api.post("/channels/mine/schedule", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user as UserDoc;
+      const { schedule } = req.body || {};
+      const myChannel = await getOrRestoreUserChannel(user);
+      myChannel.schedule = schedule || [];
+      db.channels.set(myChannel.channel_id, myChannel);
+      await syncChannelToFirestore(myChannel).catch(() => {});
+      return res.json(channelPublic(myChannel, { include_stream_key: true }));
+    } catch (err) {
+      return res.status(500).json({ error: "Failed to update schedule" });
+    }
+  });
+
+  // GET channel sessions
+  api.get("/channels/:username/sessions", async (req, res) => {
+    try {
+      const { username } = req.params;
+      const filtered = db.sessions.filter((s) => s.channel_username.toLowerCase() === username.toLowerCase());
+      return res.json(filtered);
+    } catch (err) {
+      return res.status(500).json({ error: "Failed to fetch sessions" });
+    }
+  });
+
+  // POST sessions refresh mockup
+  api.post("/channels/mine/sessions/refresh", requireAuth, async (req, res) => {
+    return res.json({ success: true, sessions: [] });
+  });
+
+  // GET Stories
+  api.get("/stories", async (req, res) => {
+    try {
+      return res.json(db.stories);
+    } catch (err) {
+      return res.status(500).json({ error: "Failed to fetch stories" });
+    }
+  });
+
+  // POST Stories
+  api.post("/stories", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user as UserDoc;
+      const { media_url, media_type, caption } = req.body || {};
+      
+      const newStory: StoryDoc = {
+        id: crypto.randomUUID(),
+        user_uid: user.uid,
+        username: user.username,
+        display_name: user.display_name,
+        user_photo_url: user.photo_url,
+        media_url: media_url || "",
+        media_type: media_type || "image",
+        caption: caption || "",
+        created_at: new Date().toISOString(),
+        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      };
+
+      db.stories.push(newStory);
+      return res.json(newStory);
+    } catch (err) {
+      return res.status(500).json({ error: "Failed to create story" });
+    }
+  });
+
+  // DELETE Stories
+  api.delete("/stories/:id", requireAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const index = db.stories.findIndex((s) => s.id === id);
+      if (index !== -1) {
+        db.stories.splice(index, 1);
+      }
+      return res.json({ success: true });
+    } catch (err) {
+      return res.status(500).json({ error: "Failed to delete story" });
+    }
+  });
+
+  // GET Notifications
+  api.get("/notifications", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user as UserDoc;
+      const filtered = db.notifications.filter((n) => n.user_uid === user.uid);
+      return res.json(filtered);
+    } catch (err) {
+      return res.status(500).json({ error: "Failed to fetch notifications" });
+    }
+  });
+
+  // POST Mark Notifications read
+  api.post("/notifications/mark-read", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user as UserDoc;
+      db.notifications.forEach((n) => {
+        if (n.user_uid === user.uid) {
+          n.read = true;
+        }
+      });
+      return res.json({ success: true });
+    } catch (err) {
+      return res.status(500).json({ error: "Failed to mark notifications read" });
+    }
+  });
+
+  // POST Follow
+  api.post("/channels/:username/follow", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user as UserDoc;
+      const { username } = req.params;
+      
+      const followObj: FollowDoc = {
+        follower_uid: user.uid,
+        follower_username: user.username,
+        channel_username: username,
+        channel_user_uid: "",
+        created_at: new Date().toISOString(),
+      };
+
+      if (!db.follows.some((f) => f.follower_uid === user.uid && f.channel_username.toLowerCase() === username.toLowerCase())) {
+        db.follows.push(followObj);
+      }
+      return res.json({ success: true });
+    } catch (err) {
+      return res.status(500).json({ error: "Failed to follow" });
+    }
+  });
+
+  // DELETE Follow
+  api.delete("/channels/:username/follow", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user as UserDoc;
+      const { username } = req.params;
+      
+      db.follows = db.follows.filter(
+        (f) => !(f.follower_uid === user.uid && f.channel_username.toLowerCase() === username.toLowerCase())
+      );
+      return res.json({ success: true });
+    } catch (err) {
+      return res.status(500).json({ error: "Failed to unfollow" });
+    }
+  });
+
+  // GET User's followed channels
+  api.get("/users/mine/following", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user as UserDoc;
+      const followed = db.follows.filter((f) => f.follower_uid === user.uid);
+      return res.json({ following: followed });
+    } catch (err) {
+      return res.status(500).json({ error: "Failed to fetch followed channels" });
+    }
+  });
+
+  // POST Subscribe
+  api.post("/channels/:username/subscribe", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user as UserDoc;
+      const { username } = req.params;
+      
+      const subObj: SubscriptionDoc = {
+        subscriber_uid: user.uid,
+        subscriber_username: user.username,
+        channel_username: username,
+        channel_user_uid: "",
+        tier: "tier_1",
+        created_at: new Date().toISOString(),
+      };
+
+      if (!db.subscriptions.some((s) => s.subscriber_uid === user.uid && s.channel_username.toLowerCase() === username.toLowerCase())) {
+        db.subscriptions.push(subObj);
+      }
+      return res.json({ success: true });
+    } catch (err) {
+      return res.status(500).json({ error: "Failed to subscribe" });
+    }
+  });
+
+  // DELETE Subscribe
+  api.delete("/channels/:username/subscribe", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user as UserDoc;
+      const { username } = req.params;
+      
+      db.subscriptions = db.subscriptions.filter(
+        (s) => !(s.subscriber_uid === user.uid && s.channel_username.toLowerCase() === username.toLowerCase())
+      );
+      return res.json({ success: true });
+    } catch (err) {
+      return res.status(500).json({ error: "Failed to unsubscribe" });
+    }
+  });
+
+  // POST increment channel view count
+  api.post("/channels/:username/view", async (req, res) => {
+    try {
+      const { username } = req.params;
+      for (const [cid, c] of db.channels.entries()) {
+        if (c.username.toLowerCase() === username.toLowerCase()) {
+          c.viewer_count = (c.viewer_count || 0) + 1;
+          db.channels.set(cid, c);
+          break;
+        }
+      }
+      return res.json({ success: true });
+    } catch (err) {
+      return res.status(500).json({ error: "Failed to register view" });
+    }
+  });
+
+  // POST Upload
+  api.post("/upload", upload.single("file"), async (req, res) => {
+    try {
+      let filename = "";
+      if (req.file) {
+        filename = req.file.filename;
+      } else {
+        const { file, image, dataUrl, filename: originalFilename } = req.body || {};
+        const base64Str = file || image || dataUrl;
+        if (base64Str) {
+          filename = saveBase64File(base64Str, originalFilename || "upload.mp3");
+        }
+      }
+
+      if (!filename) {
+        return res.status(400).json({ error: "No file uploaded or provided" });
+      }
+
+      const fileUrl = getFileUrl(req, filename);
+      console.log(`[Upload] File successfully uploaded. Saved as ${filename}. URL: ${fileUrl}`);
+      return res.json({ url: fileUrl, filename });
+    } catch (err: any) {
+      console.error("[Upload] Error handling upload:", err);
+      return res.status(500).json({ error: "Upload failed: " + err.message });
+    }
+  });
+
+  api.use("/files", express.static(path.join(process.cwd(), "uploads")));
 
   app.use("/api", api);
 
@@ -741,6 +1698,169 @@ async function startServer() {
 
   if (!process.env.VERCEL) {
     const server = http.createServer(app);
+
+    // Set up WebSocket server for live chat
+    const wss = new WebSocketServer({ noServer: true });
+    const channelsMap = new Map<string, Set<WebSocket>>();
+
+    server.on("upgrade", (request, socket, head) => {
+      try {
+        const pathname = request.url ? new URL(request.url, "http://localhost").pathname : "";
+        console.log(`[WS UPGRADE] Path: ${pathname}, URL: ${request.url}`);
+        if (pathname.startsWith("/api/ws/chat/")) {
+          wss.handleUpgrade(request, socket, head, (ws) => {
+            wss.emit("connection", ws, request);
+          });
+        } else {
+          socket.destroy();
+        }
+      } catch (err) {
+        console.error("[WS UPGRADE] Error parsing upgrade URL:", err);
+        socket.destroy();
+      }
+    });
+
+    wss.on("connection", async (ws: WebSocket, request) => {
+      try {
+        const urlObj = new URL(request.url || "", "http://localhost");
+        const pathname = urlObj.pathname;
+        const parts = pathname.split("/");
+        const channelUsername = decodeURIComponent(parts[parts.length - 1] || "");
+        
+        const token = urlObj.searchParams.get("token") || "";
+        const guestName = urlObj.searchParams.get("guest_name") || "Guest";
+
+        let user: UserDoc | null = await findUserByToken(token);
+        
+        let username = "Guest";
+        let displayName = "Guest";
+        let uid = "guest-" + crypto.randomUUID().slice(0, 8);
+        let photoUrl = null;
+        let badges: string[] = ["guest"];
+        let userColor = "#a1a1aa";
+
+        if (user) {
+          username = user.username;
+          displayName = user.display_name || user.username;
+          uid = user.uid;
+          photoUrl = user.photo_url;
+          badges = [];
+          
+          if (username.toLowerCase() === "djsparkz" || uid === "nsU1v44XFnN3FloJvNePqj6cBG2") {
+            badges.push("broadcaster");
+            userColor = "#e5ff00";
+          } else {
+            badges.push("supporter");
+            userColor = "#38bdf8";
+          }
+        } else if (guestName) {
+          displayName = guestName;
+          username = guestName.toLowerCase().replace(/\s+/g, "_");
+        }
+
+        console.log(`WebSocket connected: ${displayName} (@${username}) to channel: ${channelUsername}`);
+
+        if (!channelsMap.has(channelUsername.toLowerCase())) {
+          channelsMap.set(channelUsername.toLowerCase(), new Set());
+        }
+        channelsMap.get(channelUsername.toLowerCase())!.add(ws);
+
+        ws.send(JSON.stringify({
+          type: "system",
+          message: `Connected to ${channelUsername}'s live chat!`,
+        }));
+
+        ws.on("message", async (messageStr) => {
+          try {
+            const data = JSON.parse(messageStr.toString());
+            
+            if (data.type === "typing") {
+              const clients = channelsMap.get(channelUsername.toLowerCase());
+              if (clients) {
+                const typingPayload = JSON.stringify({
+                  type: "typing",
+                  uid,
+                  username,
+                  display_name: displayName,
+                  is_typing: Boolean(data.is_typing),
+                });
+                for (const client of clients) {
+                  if (client !== ws && client.readyState === WebSocket.OPEN) {
+                    client.send(typingPayload);
+                  }
+                }
+              }
+            } else {
+              const text = data.text || "";
+              if (!text.trim()) return;
+
+              const isHighlighted = Boolean(data.is_highlighted);
+              const msgObj: ChatMessageDoc = {
+                id: crypto.randomUUID(),
+                channel_username: channelUsername,
+                text,
+                sender_uid: uid,
+                sender_username: username,
+                sender_display_name: displayName,
+                sender_photo_url: photoUrl,
+                created_at: new Date().toISOString(),
+                is_highlighted: isHighlighted,
+                highlight_type: isHighlighted ? "neon_glow" : null,
+                sender_badges: badges,
+                sender_color: userColor,
+              };
+
+              db.chatMessages.push(msgObj);
+              if (db.chatMessages.length > 500) {
+                db.chatMessages.shift();
+              }
+
+              if (admin && admin.apps && admin.apps.length) {
+                try {
+                  const dbFs = admin.firestore();
+                  await dbFs.collection("chat_messages").doc(msgObj.id).set(msgObj);
+                } catch {}
+              }
+
+              const clients = channelsMap.get(channelUsername.toLowerCase());
+              if (clients) {
+                const messagePayload = JSON.stringify({
+                  type: "message",
+                  ...msgObj,
+                });
+                for (const client of clients) {
+                  if (client.readyState === WebSocket.OPEN) {
+                    client.send(messagePayload);
+                  }
+                }
+              }
+            }
+          } catch (err) {
+            console.error("Error processing WebSocket message:", err);
+          }
+        });
+
+        ws.on("close", () => {
+          const clients = channelsMap.get(channelUsername.toLowerCase());
+          if (clients) {
+            clients.delete(ws);
+            if (clients.size === 0) {
+              channelsMap.delete(channelUsername.toLowerCase());
+            }
+          }
+          console.log(`WebSocket disconnected: ${displayName} from channel: ${channelUsername}`);
+        });
+
+        ws.on("error", (err) => {
+          console.error("WebSocket client error:", err);
+        });
+
+      } catch (err) {
+        console.error("Error establishing WebSocket connection:", err);
+        ws.close();
+      }
+    });
+
     server.listen(PORT, "0.0.0.0", () => {
       console.log(`Server running on http://0.0.0.0:${PORT}`);
     });

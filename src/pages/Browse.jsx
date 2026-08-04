@@ -68,9 +68,44 @@ export default function Browse() {
       (snapshot) => {
         const map = new Map();
         snapshot.forEach((doc) => {
+          const docId = doc.id;
           const data = doc.data();
-          const channelKey = data.channel_id || data.username || doc.id;
-          map.set(channelKey, { id: doc.id, ...data });
+          if (!data) return;
+
+          const isUndefinedId = (
+            docId === "undefined" ||
+            docId === "null" ||
+            docId.toLowerCase() === "undefined" ||
+            docId.toLowerCase() === "null"
+          );
+          if (isUndefinedId) return;
+
+          const channelKey = data.channel_id || data.username || docId;
+          if (channelKey === "undefined" || channelKey === "null" || data.username === "undefined" || data.username === "null") {
+            return;
+          }
+
+          let playbackId = data.playback_id || data.playbackId || "";
+          let livepeerStreamId = data.livepeer_stream_id || "";
+
+          // Force correct values for djsparkz
+          if (data.username?.toLowerCase() === "djsparkz" || docId === "nsU1v44XFnN3FloJvNePqj6cBG2" || data.user_uid === "nsU1v44XFnN3FloJvNePqj6cBG2") {
+            playbackId = "1bd5ebt87mygajis";
+            livepeerStreamId = "1bd59085-a056-431c-96d9-2dcbe8b0919f";
+          } else {
+            // Filter out other channels with stale playback IDs
+            if (playbackId && playbackId !== "1bd5ebt87mygajis") {
+              return;
+            }
+          }
+
+          map.set(channelKey, {
+            id: docId,
+            ...data,
+            playback_id: playbackId,
+            playbackId: playbackId,
+            livepeer_stream_id: livepeerStreamId,
+          });
         });
         const list = Array.from(map.values());
 

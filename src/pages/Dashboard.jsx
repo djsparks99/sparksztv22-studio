@@ -33,6 +33,8 @@ export default function Dashboard() {
   const [reveal, setReveal] = useState(true);
   const [creatingStream, setCreatingStream] = useState(false);
   const [autoDetect, setAutoDetect] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useLivepeerAutoPoll(channel?.username);
 
@@ -56,7 +58,13 @@ export default function Dashboard() {
   }, [user?.uid, localKeyName, localPlaybackName]);
 
   const load = async () => {
+    if (!user) {
+      setLoading(false);
+      return;
+    }
     try {
+      setLoading(true);
+      setError(null);
       const { data } = await api.get("/channels/mine");
       if (data) {
         const storedKey = localStorage.getItem(localKeyName) || localStorage.getItem("sparkz_stream_key") || "";
@@ -137,19 +145,28 @@ export default function Dashboard() {
             }));
           }
         }
+      } else {
+        setError("No channel metadata returned from server.");
       }
     } catch (e) {
-      console.error(e);
+      console.error("Dashboard load channel error:", e);
+      setError(apiErrorMessage(e) || "Failed to load channel data.");
+    } finally {
+      setLoading(false);
     }
   };
 
   useEffect(() => {
-    load();
-    api
-      .get("/livepeer/webhook/status")
-      .then(({ data }) => setAutoDetect(!!data.configured))
-      .catch(() => setAutoDetect(true));
-  }, [user?.uid]);
+    if (user) {
+      load();
+      api
+        .get("/livepeer/webhook/status")
+        .then(({ data }) => setAutoDetect(!!data.configured))
+        .catch(() => setAutoDetect(true));
+    } else if (user === null) {
+      setLoading(false);
+    }
+  }, [user]);
 
   // Poll for auto-detected go-live from Livepeer while dashboard is open
   useEffect(() => {
@@ -369,10 +386,79 @@ export default function Dashboard() {
     toast.success(`${label} copied.`);
   };
 
-  if (!channel) {
+  // 1. If authorization is loading
+  if (user === undefined) {
+    return (
+      <div className="mx-auto max-w-[1440px] px-6 py-24 text-center">
+        <div className="flex flex-col items-center justify-center gap-4 py-20">
+          <RefreshCw className="h-8 w-8 animate-spin text-[#e5ff00]" />
+          <p className="font-mono text-sm uppercase tracking-widest text-zinc-400">
+            Checking authorization...
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. If user is logged out (not authenticated)
+  if (user === null) {
+    return (
+      <div className="mx-auto max-w-md px-6 py-24">
+        <div className="border border-[#27272a] bg-[#0a0a0a] p-8 text-center">
+          <div className="label-caps text-red-500 mb-4">// ACCESS DENIED</div>
+          <h2 className="font-display text-2xl font-black mb-2 tracking-tight">NOT AUTHENTICATED</h2>
+          <p className="text-zinc-400 text-sm mb-6 leading-relaxed">
+            You must be logged in to access the Creator Studio / Dashboard.
+          </p>
+          <a href="/login" className="btn-primary inline-block w-full text-center">
+            LOG IN TO SPARKZ.TV
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  // 3. If loading API data and we don't have channel state yet
+  if (loading && !channel) {
     return (
       <div className="mx-auto max-w-[1440px] px-6 py-16">
-        <div className="h-96 animate-pulse bg-[#0a0a0a]" />
+        <div className="h-96 animate-pulse bg-[#0a0a0a] border border-[#27272a]" />
+      </div>
+    );
+  }
+
+  // 4. If loading failed and we don't have channel state yet
+  if (error && !channel) {
+    return (
+      <div className="mx-auto max-w-xl px-6 py-16">
+        <div className="border border-red-950 bg-[#0a0a0a] p-8 text-center">
+          <div className="label-caps text-red-500 mb-2">// LOADING ERROR</div>
+          <h2 className="font-display text-xl font-bold mb-4 tracking-tight">FAILED TO LOAD CREATOR STUDIO</h2>
+          <p className="text-zinc-400 text-sm mb-6 font-mono border border-[#27272a] bg-black p-3 rounded text-left overflow-x-auto">
+            {error}
+          </p>
+          <button onClick={load} className="btn-primary w-full flex items-center justify-center gap-2">
+            <RefreshCw className="h-4 w-4" /> RETRY LOADING
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // 5. If channel loaded but somehow still empty (safe fallback)
+  if (!channel) {
+    return (
+      <div className="mx-auto max-w-xl px-6 py-16">
+        <div className="border border-zinc-800 bg-[#0a0a0a] p-8 text-center">
+          <div className="label-caps text-zinc-500 mb-2">// INITIALIZING</div>
+          <h2 className="font-display text-xl font-bold mb-4 tracking-tight">SETTING UP CREATOR STUDIO</h2>
+          <p className="text-zinc-400 text-sm mb-6 leading-relaxed">
+            We are preparing your stream settings. Click below to initialize your channel.
+          </p>
+          <button onClick={() => createStream(false)} className="btn-primary w-full">
+            INITIALIZE STREAM KEY
+          </button>
+        </div>
       </div>
     );
   }

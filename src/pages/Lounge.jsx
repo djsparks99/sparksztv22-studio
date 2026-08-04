@@ -81,6 +81,7 @@ export default function Lounge() {
   const [trackDuration, setTrackDuration] = useState(0);
   const [volume, setVolume] = useState(0.8);
   const audioElRef = useRef(null);
+  const lastTrackIdRef = useRef(null);
   
   const chatContainerRef = useRef(null);
 
@@ -420,17 +421,36 @@ export default function Lounge() {
   };
 
   useEffect(() => {
-    if (audioElRef.current) {
+    if (!audioElRef.current) return;
+
+    const audio = audioElRef.current;
+    const trackChanged = lastTrackIdRef.current !== activeTrack?.id;
+    lastTrackIdRef.current = activeTrack?.id;
+
+    if (trackChanged) {
+      audio.pause();
+    } else {
       if (isPlaying) {
-        audioElRef.current.play().catch(e => {
+        audio.play().catch(e => {
           console.warn("Audio autoplay blocked or failed:", e);
           setIsPlaying(false);
         });
       } else {
-        audioElRef.current.pause();
+        audio.pause();
       }
     }
   }, [isPlaying, activeTrack]);
+
+  const handleCanPlay = () => {
+    if (audioElRef.current && isPlaying) {
+      audioElRef.current.play().catch(e => {
+        console.warn("Audio play failed on canplay:", e);
+        if (e.name === "NotAllowedError") {
+          setIsPlaying(false);
+        }
+      });
+    }
+  };
 
   const handleTimeUpdate = () => {
     if (audioElRef.current) {
@@ -1159,6 +1179,7 @@ export default function Lounge() {
             src={fileUrl(activeTrack.url)}
             onTimeUpdate={handleTimeUpdate}
             onLoadedMetadata={handleLoadedMetadata}
+            onCanPlay={handleCanPlay}
             onEnded={() => setIsPlaying(false)}
           />
           
