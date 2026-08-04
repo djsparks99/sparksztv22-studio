@@ -646,7 +646,7 @@ async function startServer() {
   });
 
   app.use("/api", api);
-  app.use(["/channels"], api);
+ 
 
   const distPath = path.join(process.cwd(), "dist");
   app.use(express.static(distPath));
