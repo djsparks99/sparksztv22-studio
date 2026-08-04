@@ -288,8 +288,9 @@ async function purgeInvalidFirestoreDocuments() {
           docId.toLowerCase() === "null"
         );
 
-        // Purge if ID is undefined/null or playback_id does not match the permanent active playback ID ('1bd5ebt87mygajis')
-        if (isUndefinedId || playbackId !== "1bd5ebt87mygajis") {
+        const isOmitEmpty = !playbackId || playbackId === "undefined" || playbackId === "null";
+
+        if (isUndefinedId || isOmitEmpty) {
           console.log(`[Firestore Sync] Deleting invalid/stale document: docId="${docId}", playback_id="${playbackId}"`);
           deletions.push(dbFs.collection("channels").doc(docId).delete());
         }
@@ -374,14 +375,9 @@ async function restoreChannelsFromFirestore() {
           let livepeerStreamId = data.livepeer_stream_id || "";
 
           // Clean up and enforce single source of truth on load
-          if (data.username.toLowerCase() === "djsparkz" || channelId === "nsU1v44XFnN3FloJvNePqj6cBG2" || data.user_uid === "nsU1v44XFnN3FloJvNePqj6cBG2") {
+          if (data.username && (data.username.toLowerCase() === "djsparkz" || channelId === "nsU1v44XFnN3FloJvNePqj6cBG2" || data.user_uid === "nsU1v44XFnN3FloJvNePqj6cBG2")) {
             playbackId = "1bd5ebt87mygajis";
             livepeerStreamId = "1bd59085-a056-431c-96d9-2dcbe8b0919f";
-          } else {
-            // Skip any other channels that don't match the active stream
-            if (playbackId && playbackId !== "1bd5ebt87mygajis") {
-              return;
-            }
           }
 
           const channelObj: ChannelDoc = {
@@ -699,11 +695,6 @@ function channelPublic(
   if (c.username?.toLowerCase() === "djsparkz" || c.channel_id === "nsU1v44XFnN3FloJvNePqj6cBG2" || c.user_uid === "nsU1v44XFnN3FloJvNePqj6cBG2") {
     isLive = Boolean(c.is_live);
     playbackId = "1bd5ebt87mygajis";
-  } else {
-    // For other channels, prevent serving stale/old playback IDs
-    if (playbackId && playbackId !== "1bd5ebt87mygajis") {
-      playbackId = "";
-    }
   }
 
   const playbackUrl = `https://lvpr.tv/?v=${playbackId}`;
@@ -858,6 +849,42 @@ async function getOrRestoreUserChannel(user: UserDoc): Promise<ChannelDoc> {
     }
   }
 
+  // Check Firestore directly for persistent stream credentials
+  if (admin && admin.apps && admin.apps.length) {
+    try {
+      const dbFs = admin.firestore();
+      const doc = await dbFs.collection("channels").doc(user.uid).get();
+      if (doc.exists) {
+        const data = doc.data() || {};
+        if (data.playback_id && data.stream_key) {
+          const channelObj: ChannelDoc = {
+            channel_id: user.uid,
+            user_uid: user.uid,
+            username: user.username,
+            display_name: user.display_name || data.display_name || user.username,
+            photo_url: user.photo_url || data.photo_url || null,
+            thumbnail_url: data.thumbnail_url || null,
+            livepeer_stream_id: data.livepeer_stream_id || "",
+            stream_key: data.stream_key || "",
+            playback_id: data.playback_id || "",
+            stream_title: data.stream_title || `${user.display_name}'s Live Stream`,
+            category: data.category || "music",
+            is_live: Boolean(data.is_live ?? false),
+            viewer_count: typeof data.viewer_count === "number" ? data.viewer_count : 0,
+            schedule: data.schedule || [],
+            last_updated: data.last_updated || new Date().toISOString(),
+            created_at: data.created_at || new Date().toISOString(),
+          };
+          db.channels.set(user.uid, channelObj);
+          return channelObj;
+        }
+      }
+    } catch (fsErr) {
+      console.error("[getOrRestoreUserChannel] Failed to fetch existing channel from Firestore:", fsErr);
+    }
+  }
+
+  console.log(`[getOrRestoreUserChannel] No existing stream record in memory/Firestore for user ${user.username}. Provisioning Livepeer stream...`);
   const livepeerStream = await createLivepeerStream(user.username);
   const channelToSave: ChannelDoc = {
     channel_id: user.uid || crypto.randomUUID(),

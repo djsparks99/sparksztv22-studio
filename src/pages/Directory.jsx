@@ -98,11 +98,6 @@ export default function Directory() {
           if (data.username?.toLowerCase() === "djsparkz" || docId === "nsU1v44XFnN3FloJvNePqj6cBG2" || data.user_uid === "nsU1v44XFnN3FloJvNePqj6cBG2") {
             playbackId = "1bd5ebt87mygajis";
             livepeerStreamId = "1bd59085-a056-431c-96d9-2dcbe8b0919f";
-          } else {
-            // Filter out other channels with stale playback IDs
-            if (playbackId && playbackId !== "1bd5ebt87mygajis") {
-              return null;
-            }
           }
 
           return {
