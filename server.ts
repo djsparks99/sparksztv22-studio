@@ -855,10 +855,15 @@ async function getOrRestoreUserChannel(user: UserDoc): Promise<ChannelDoc> {
     try {
       const dbFs = admin.firestore();
       
+      let doc = null;
+      let data = null;
+
       // Query Firestore first under the `channels` collection using their `user_uid`
       let querySnap = await dbFs.collection("channels").where("user_uid", "==", user.uid).limit(1).get();
-      let doc = !querySnap.empty ? querySnap.docs[0] : null;
-      let data = doc ? doc.data() : null;
+      if (!querySnap.empty) {
+        doc = querySnap.docs[0];
+        data = doc.data();
+      }
 
       // Fallback: Look up by doc ID = user.uid
       if (!data) {
@@ -878,6 +883,15 @@ async function getOrRestoreUserChannel(user: UserDoc): Promise<ChannelDoc> {
         }
       }
 
+      // Fallback: Look up by doc ID = user.username.toLowerCase()
+      if (!data && user.username) {
+        const nameDoc = await dbFs.collection("channels").doc(user.username.toLowerCase()).get();
+        if (nameDoc.exists) {
+          doc = nameDoc;
+          data = nameDoc.data();
+        }
+      }
+
       if (data) {
         // 2. PREVENT DYNAMIC RE-CREATION: If a document already exists for that user and contains `livepeer_stream_id`, `stream_key`, and `playback_id`, the server MUST load and return those exact stored credentials. It is strictly forbidden to call Livepeer's stream creation endpoint if a record already exists in the database.
         const loadedPlaybackId = data.playback_id || data.playbackId || "";
@@ -887,7 +901,7 @@ async function getOrRestoreUserChannel(user: UserDoc): Promise<ChannelDoc> {
         console.log(`[Firestore First] Found existing channel record in Firestore for user ${user.username} (UID: ${user.uid}): playback_id="${loadedPlaybackId}", stream_id="${loadedStreamId}"`);
         
         const channelObj: ChannelDoc = {
-          channel_id: doc ? doc.id : (user.uid || crypto.randomUUID()),
+          channel_id: data.channel_id || (doc ? doc.id : (user.uid || crypto.randomUUID())),
           user_uid: data.user_uid || user.uid,
           username: data.username || user.username,
           display_name: data.display_name || user.display_name || data.username || user.username,
@@ -900,6 +914,7 @@ async function getOrRestoreUserChannel(user: UserDoc): Promise<ChannelDoc> {
           category: data.category || "music",
           is_live: Boolean(data.is_live ?? data.isLive ?? false),
           viewer_count: typeof data.viewer_count === "number" ? data.viewer_count : 0,
+          record_enabled: Boolean(data.record_enabled ?? data.recordEnabled ?? true),
           schedule: data.schedule || [],
           last_updated: data.last_updated || new Date().toISOString(),
           created_at: data.created_at || new Date().toISOString(),
