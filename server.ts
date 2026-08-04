@@ -779,6 +779,44 @@ async function authenticateToken(req: Request): Promise<UserDoc | null> {
   return findUserByToken(token);
 }
 
+async function getOrResolveChannelPlaybackId(channel: ChannelDoc): Promise<ChannelDoc> {
+  // If the playback ID is missing from the database record, fallback to fetching it via the stored livepeer_stream_id instead of generating a brand new stream.
+  if (!channel.playback_id && channel.livepeer_stream_id) {
+    console.log(`[Playback Fallback] Playback ID is missing for channel ${channel.username} (stream_id: "${channel.livepeer_stream_id}"). Fetching from Livepeer...`);
+    const apiKey = process.env.LIVEPEER_API_KEY;
+    if (apiKey) {
+      try {
+        const livepeerRes = await fetch(`https://livepeer.studio/api/stream/${channel.livepeer_stream_id}`, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+        });
+        if (livepeerRes.ok) {
+          const streamDetails = await livepeerRes.json();
+          const fetchedPlaybackId = streamDetails.playbackId || streamDetails.playback_id || "";
+          const fetchedStreamKey = streamDetails.streamKey || streamDetails.stream_key || "";
+          
+          if (fetchedPlaybackId) {
+            channel.playback_id = fetchedPlaybackId;
+            if (fetchedStreamKey && !channel.stream_key) {
+              channel.stream_key = fetchedStreamKey;
+            }
+            channel.last_updated = new Date().toISOString();
+            db.channels.set(channel.channel_id, channel);
+            await syncChannelToFirestore(channel).catch((e) => console.error("[Playback Fallback] Sync failed:", e));
+            console.log(`[Playback Fallback] Successfully restored playback_id="${fetchedPlaybackId}" for ${channel.username}`);
+          }
+        } else {
+          console.error(`[Playback Fallback] Livepeer fetch returned status ${livepeerRes.status}`);
+        }
+      } catch (err) {
+        console.error(`[Playback Fallback] Error contacting Livepeer:`, err);
+      }
+    } else {
+      console.log(`[Playback Fallback] LIVEPEER_API_KEY not configured, cannot fetch from Livepeer.`);
+    }
+  }
+  return channel;
+}
+
 async function getOrRestoreUserChannel(user: UserDoc): Promise<ChannelDoc> {
   if (user.username.toLowerCase() === "djsparkz" || user.uid === "nsU1v44XFnN3FloJvNePqj6cBG2") {
     let chan = db.channels.get("nsU1v44XFnN3FloJvNePqj6cBG2");
@@ -888,7 +926,7 @@ async function getOrRestoreUserChannel(user: UserDoc): Promise<ChannelDoc> {
         };
 
         db.channels.set(channelObj.channel_id, channelObj);
-        return channelObj;
+        return getOrResolveChannelPlaybackId(channelObj);
       }
     } catch (fsErr) {
       console.error("[getOrRestoreUserChannel] Failed to perform Firestore-first lookup:", fsErr);
@@ -899,7 +937,7 @@ async function getOrRestoreUserChannel(user: UserDoc): Promise<ChannelDoc> {
   for (const c of db.channels.values()) {
     if (c.user_uid === user.uid || (c.username && c.username.toLowerCase() === user.username.toLowerCase())) {
       console.log(`[getOrRestoreUserChannel] Found existing in-memory channel for user ${user.username} (UID: ${user.uid}) after Firestore lookup fallback.`);
-      return c;
+      return getOrResolveChannelPlaybackId(c);
     }
   }
 
@@ -1131,6 +1169,60 @@ async function startServer() {
       }
     }
 
+    // Look up in Firestore if not present in memory cache
+    if (!found && admin && admin.apps && admin.apps.length) {
+      try {
+        const dbFs = admin.firestore();
+        let querySnap = await dbFs.collection("channels").where("username", "==", req.params.username).limit(1).get();
+        if (querySnap.empty) {
+          querySnap = await dbFs.collection("channels").where("user_uid", "==", req.params.username).limit(1).get();
+        }
+        let doc = !querySnap.empty ? querySnap.docs[0] : null;
+        let data = doc ? doc.data() : null;
+
+        if (!data) {
+          const directDoc = await dbFs.collection("channels").doc(req.params.username).get();
+          if (directDoc.exists) {
+            doc = directDoc;
+            data = directDoc.data();
+          }
+        }
+        if (!data) {
+          const lowerDoc = await dbFs.collection("channels").doc(uname).get();
+          if (lowerDoc.exists) {
+            doc = lowerDoc;
+            data = lowerDoc.data();
+          }
+        }
+
+        if (data) {
+          const channelObj: ChannelDoc = {
+            channel_id: data.channel_id || (doc ? doc.id : req.params.username),
+            user_uid: data.user_uid || uname,
+            username: data.username || req.params.username,
+            display_name: data.display_name || data.username || req.params.username,
+            photo_url: data.photo_url || null,
+            thumbnail_url: data.thumbnail_url || null,
+            livepeer_stream_id: data.livepeer_stream_id || data.stream_id || data.streamId || "",
+            stream_key: data.stream_key || data.streamKey || "",
+            playback_id: data.playback_id || data.playbackId || "",
+            stream_title: data.stream_title || `${data.display_name || data.username}'s Live Stream`,
+            category: data.category || "music",
+            is_live: Boolean(data.is_live ?? data.isLive ?? false),
+            viewer_count: typeof data.viewer_count === "number" ? data.viewer_count : 0,
+            record_enabled: Boolean(data.record_enabled ?? data.recordEnabled ?? true),
+            schedule: data.schedule || [],
+            last_updated: data.last_updated || new Date().toISOString(),
+            created_at: data.created_at || new Date().toISOString(),
+          };
+          db.channels.set(channelObj.channel_id, channelObj);
+          found = channelObj;
+        }
+      } catch (fsErr) {
+        console.error("[GET /channels/:username] Firestore fallback lookup failed:", fsErr);
+      }
+    }
+
     if (!found) {
       if (uname === "djsparkz" || uname === "nsu1v44xfnn3flojvnepqj6cbg2") {
         const stubChannel: ChannelDoc = {
@@ -1158,15 +1250,18 @@ async function startServer() {
       return res.status(404).json({ error: "Channel not found" });
     }
 
-    res.json(channelPublic(found));
+    const resolved = await getOrResolveChannelPlaybackId(found);
+    return res.json(channelPublic(resolved));
   });
 
   // GET all channels
   api.get("/channels", async (req, res) => {
     try {
-      const channelsList = Array.from(db.channels.values()).map((c) =>
-        channelPublic(c)
-      );
+      const channelsList = [];
+      for (const c of db.channels.values()) {
+        const resolved = await getOrResolveChannelPlaybackId(c);
+        channelsList.push(channelPublic(resolved));
+      }
       return res.json(channelsList);
     } catch (err) {
       return res.status(500).json({ error: "Failed to list channels" });
