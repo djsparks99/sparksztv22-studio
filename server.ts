@@ -117,44 +117,11 @@ async function createLivepeerStream(name: string): Promise<{
   streamKey: string;
   playbackId: string;
 }> {
-  const apiKey = process.env.LIVEPEER_API_KEY;
-  if (apiKey) {
-    try {
-      console.log(`Communicating with Livepeer Studio API for stream "${name}"...`);
-      const res = await fetch("https://livepeer.studio/api/stream", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          name: name || "livepeer-stream",
-          record: true,
-        }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        const streamId = data.id || data.streamId || `stream_${crypto.randomBytes(8).toString("hex")}`;
-        const streamKey = data.streamKey || data.stream_key || `sk_${crypto.randomBytes(12).toString("hex")}`;
-        const playbackId = data.playbackId || data.playback_id || crypto.randomBytes(8).toString("hex");
-        console.log(`Livepeer Stream Created Successfully: ID=${streamId}, playbackId=${playbackId}`);
-        return { id: streamId, streamKey, playbackId };
-      } else {
-        const errText = await res.text();
-        console.error(`Livepeer API returned ${res.status}:`, errText);
-      }
-    } catch (e) {
-      console.error("Failed to connect to Livepeer API:", e);
-    }
-  } else {
-    console.log("LIVEPEER_API_KEY not configured in env. Generating studio stream credentials.");
-  }
-
+  console.log(`[Livepeer Stream] Blocked automatic stream creation attempt for "${name}". Livepeer auto-generation is disabled.`);
   return {
-    id: `stream_${crypto.randomBytes(8).toString("hex")}`,
-    streamKey: `sk_${crypto.randomBytes(12).toString("hex")}`,
-    playbackId: crypto.randomBytes(8).toString("hex"),
+    id: "",
+    streamKey: "",
+    playbackId: "",
   };
 }
 
@@ -936,20 +903,19 @@ async function getOrRestoreUserChannel(user: UserDoc): Promise<ChannelDoc> {
     }
   }
 
-  // 3. ON-DEMAND PROVISIONING FOR NEW USERS: Only if a user has zero records in Firestore should the backend call Livepeer to create a new stream, immediately saving the resulting `livepeer_stream_id`, `stream_key`, and `playback_id` to their Firestore channel document so it remains permanently locked from then on.
-  console.log(`[getOrRestoreUserChannel] No existing stream record in memory or Firestore for user ${user.username}. Provisioning Livepeer stream dynamically...`);
-  const livepeerStream = await createLivepeerStream(user.username);
+  // 3. UNCONFIGURED STATE FOR NEW USERS: If a user has zero records in Firestore/memory, do NOT call Livepeer API. Return a default, unconfigured empty channel document so the user can perform a manual setup.
+  console.log(`[getOrRestoreUserChannel] No existing stream record in memory or Firestore for user ${user.username}. Returning empty/unconfigured channel.`);
   const channelToSave: ChannelDoc = {
     channel_id: user.uid || crypto.randomUUID(),
     user_uid: user.uid,
     username: user.username,
-    display_name: user.display_name,
+    display_name: user.display_name || user.username,
     photo_url: user.photo_url || null,
     thumbnail_url: null,
-    livepeer_stream_id: livepeerStream.id,
-    stream_key: livepeerStream.streamKey,
-    playback_id: livepeerStream.playbackId,
-    stream_title: `${user.display_name}'s Live Stream`,
+    livepeer_stream_id: "",
+    stream_key: "",
+    playback_id: "",
+    stream_title: `${user.display_name || user.username}'s Live Stream (Unconfigured)`,
     category: "music",
     is_live: false,
     viewer_count: 0,
