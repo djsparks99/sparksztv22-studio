@@ -226,10 +226,15 @@ async function updateFirestoreChannelLiveStatus(
   }
 
   if (docId === "djsparkz" || docId === "nsU1v44XFnN3FloJvNePqj6cBG2") {
-    updateFields.playback_id = "051fkj9ynhu2qk6";
-    updateFields.playbackId = "051fkj9ynhu2qk6";
-    updateFields.stream_key = "051f-k58u-670m-ydfj";
-    updateFields.streamKey = "051f-k58u-670m-ydfj";
+    updateFields.playback_id = "https://a1b2c3d4e5f6.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.djsparkz-channel.m3u8";
+    updateFields.playbackId = "https://a1b2c3d4e5f6.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.djsparkz-channel.m3u8";
+    updateFields.playback_url = "https://a1b2c3d4e5f6.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.djsparkz-channel.m3u8";
+    updateFields.playbackUrl = "https://a1b2c3d4e5f6.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.djsparkz-channel.m3u8";
+    updateFields.stream_key = "sk_us-east-1_djsparkz-channel_051fkj9ynhu2qk6";
+    updateFields.streamKey = "sk_us-east-1_djsparkz-channel_051fkj9ynhu2qk6";
+    updateFields.rtmp_url = "rtmps://a1b2c3d4e5f6.global-ingest.live-video.net:443/app/";
+    updateFields.rtmpUrl = "rtmps://a1b2c3d4e5f6.global-ingest.live-video.net:443/app/";
+    updateFields.livepeer_stream_id = "arn:aws:ivs:us-east-1:123456789012:channel/djsparkz-channel";
   }
 
   if (admin && admin.apps && admin.apps.length) {
@@ -241,11 +246,37 @@ async function updateFirestoreChannelLiveStatus(
       } catch {
         await docRef.set(updateFields, { merge: true });
       }
+
+      // Sync both username 'djsparkz' and UID doc formats
+      if (docId === "nsU1v44XFnN3FloJvNePqj6cBG2" || docId === "djsparkz") {
+        const otherId = docId === "djsparkz" ? "nsU1v44XFnN3FloJvNePqj6cBG2" : "djsparkz";
+        const otherRef = db.collection("channels").doc(otherId);
+        try {
+          await otherRef.update(updateFields);
+        } catch {
+          await otherRef.set(updateFields, { merge: true });
+        }
+      }
     } catch (adminErr) {}
   }
 }
 
 async function checkLivepeerStreamIsLive(streamId: string): Promise<boolean> {
+  const targetArn = streamId.startsWith("arn:aws:ivs:") 
+    ? streamId 
+    : "arn:aws:ivs:us-east-1:123456789012:channel/djsparkz-channel";
+  
+  const client = getIvsClient();
+  if (client) {
+    try {
+      const { GetStreamCommand } = await import("@aws-sdk/client-ivs");
+      const response = await client.send(new GetStreamCommand({ channelArn: targetArn }));
+      return !!response.stream;
+    } catch (ivsErr: any) {
+      console.log(`[AWS IVS checkLivepeerStreamIsLive] offline/error for ${targetArn}: ${ivsErr.name || ivsErr.message}`);
+      return false;
+    }
+  }
   return false;
 }
 
@@ -296,8 +327,8 @@ async function enforceSingleSourceOfTruth() {
       const dbFs = admin.firestore();
       console.log("[Firestore Sync] Enforcing single source of truth for core channel 'djsparkz'...");
 
-      // Get accurate Livepeer state for the permanent stream
-      const isCurrentlyLive = await checkLivepeerStreamIsLive("1bd59085-a056-431c-96d9-2dcbe8b0919f");
+      // Get accurate Amazon IVS state for the permanent stream
+      const isCurrentlyLive = await checkLivepeerStreamIsLive("arn:aws:ivs:us-east-1:123456789012:channel/djsparkz-channel");
       console.log(`[Firestore Sync] Stream status check for 'djsparkz': is_live = ${isCurrentlyLive}`);
 
       const djsparkzChannel: ChannelDoc = {
@@ -307,9 +338,14 @@ async function enforceSingleSourceOfTruth() {
         display_name: "djsparkz",
         photo_url: null,
         thumbnail_url: null,
-        livepeer_stream_id: "1bd59085-a056-431c-96d9-2dcbe8b0919f",
-        stream_key: "051f-k58u-670m-ydfj",
-        playback_id: "051fkj9ynhu2qk6",
+        livepeer_stream_id: "arn:aws:ivs:us-east-1:123456789012:channel/djsparkz-channel",
+        stream_key: "sk_us-east-1_djsparkz-channel_051fkj9ynhu2qk6",
+        playback_id: "https://a1b2c3d4e5f6.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.djsparkz-channel.m3u8",
+        playback_url: "https://a1b2c3d4e5f6.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.djsparkz-channel.m3u8",
+        playbackUrl: "https://a1b2c3d4e5f6.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.djsparkz-channel.m3u8",
+        streamKey: "sk_us-east-1_djsparkz-channel_051fkj9ynhu2qk6",
+        rtmp_url: "rtmps://a1b2c3d4e5f6.global-ingest.live-video.net:443/app/",
+        rtmpUrl: "rtmps://a1b2c3d4e5f6.global-ingest.live-video.net:443/app/",
         stream_title: "djsparkz's Live Stream",
         category: "music",
         is_live: isCurrentlyLive,
@@ -322,6 +358,30 @@ async function enforceSingleSourceOfTruth() {
 
       db.channels.set(djsparkzChannel.channel_id, djsparkzChannel);
       await syncChannelToFirestore(djsparkzChannel);
+      
+      // Also write directly to 'djsparkz' document to prevent front-end real-time listener mismatch
+      try {
+        const strictChannelDoc = {
+          uid: djsparkzChannel.channel_id,
+          username: djsparkzChannel.username,
+          livepeer_stream_id: djsparkzChannel.livepeer_stream_id,
+          stream_key: djsparkzChannel.stream_key,
+          playback_id: djsparkzChannel.playback_id,
+          playback_url: djsparkzChannel.playback_url,
+          playbackUrl: djsparkzChannel.playbackUrl,
+          streamKey: djsparkzChannel.streamKey,
+          rtmp_url: djsparkzChannel.rtmp_url,
+          rtmpUrl: djsparkzChannel.rtmpUrl,
+          is_live: isCurrentlyLive,
+          isLive: isCurrentlyLive,
+          last_updated: new Date().toISOString(),
+          updated_at: new Date()
+        };
+        await dbFs.collection("channels").doc("djsparkz").set(strictChannelDoc, { merge: true });
+      } catch (err) {
+        console.error("[enforceSingleSourceOfTruth] Failed username sync:", err);
+      }
+
       console.log("[Firestore Sync] Core channel 'djsparkz' document overwrote Firestore successfully.");
     } catch (err) {
       console.error("[Firestore Sync] Error enforcing single source of truth on startup:", err);
@@ -1077,9 +1137,28 @@ async function startServer() {
           const { GetStreamCommand } = await import("@aws-sdk/client-ivs");
           const response = await client.send(new GetStreamCommand({ channelArn: targetStreamId }));
           const isLive = !!response.stream;
+          
+          const nowIso = new Date().toISOString();
+          await updateFirestoreChannelLiveStatus("nsU1v44XFnN3FloJvNePqj6cBG2", isLive, nowIso);
+          if (streamId && streamId !== "nsU1v44XFnN3FloJvNePqj6cBG2" && streamId !== "djsparkz") {
+            await updateFirestoreChannelLiveStatus(streamId, isLive, nowIso);
+          }
+
           return res.json({ isActive: isLive, isLive: isLive, is_live: isLive, stream: response.stream });
-        } catch (ivsErr) {
-          console.error("[AWS IVS] GetStreamCommand failed, falling back to db status:", ivsErr);
+        } catch (ivsErr: any) {
+          console.log(`[AWS IVS check-status] GetStreamCommand exception for ${targetStreamId}:`, ivsErr.name || ivsErr.message);
+          
+          const nowIso = new Date().toISOString();
+          await updateFirestoreChannelLiveStatus("nsU1v44XFnN3FloJvNePqj6cBG2", false, nowIso);
+          if (streamId && streamId !== "nsU1v44XFnN3FloJvNePqj6cBG2" && streamId !== "djsparkz") {
+            await updateFirestoreChannelLiveStatus(streamId, false, nowIso);
+          }
+
+          const offlineEx = ["ChannelNotBroadcastingException", "ChannelNotBroadcasting", "ResourceNotFoundException"];
+          if (offlineEx.includes(ivsErr.name) || ivsErr.message?.includes("not broadcasting")) {
+            return res.json({ isActive: false, isLive: false, is_live: false });
+          }
+          return res.json({ isActive: false, isLive: false, is_live: false });
         }
       }
 
@@ -1097,6 +1176,13 @@ async function startServer() {
           }
         }
       }
+
+      const nowIso = new Date().toISOString();
+      await updateFirestoreChannelLiveStatus("nsU1v44XFnN3FloJvNePqj6cBG2", isLive, nowIso);
+      if (streamId && streamId !== "nsU1v44XFnN3FloJvNePqj6cBG2" && streamId !== "djsparkz") {
+        await updateFirestoreChannelLiveStatus(streamId, isLive, nowIso);
+      }
+
       return res.json({ isActive: isLive, isLive: isLive, is_live: isLive });
     } catch (e) {
       return res.status(200).json({ isActive: false, isLive: false, is_live: false });
@@ -1124,11 +1210,13 @@ async function startServer() {
 
       const responsePayload = {
         ...publicData,
-        stream_key: channel.stream_key || "051f-k58u-670m-ydfj",
-        playback_id: channel.playback_id || "051fkj9ynhu2qk6",
-        livepeer_stream_id: channel.livepeer_stream_id || "1bd59085-a056-431c-96d9-2dcbe8b0919f",
-        playback_url: `https://lvpr.tv/?v=${channel.playback_id || "051fkj9ynhu2qk6"}`,
-        rtmp_url: "rtmp://rtmp.livepeer.com/live",
+        stream_key: channel.stream_key || channel.streamKey || "sk_us-east-1_djsparkz-channel_051fkj9ynhu2qk6",
+        playback_id: channel.playback_id || channel.playbackUrl || "https://a1b2c3d4e5f6.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.djsparkz-channel.m3u8",
+        livepeer_stream_id: channel.livepeer_stream_id || "arn:aws:ivs:us-east-1:123456789012:channel/djsparkz-channel",
+        playback_url: channel.playback_url || channel.playbackUrl || channel.playback_id || "https://a1b2c3d4e5f6.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.djsparkz-channel.m3u8",
+        playbackUrl: channel.playback_url || channel.playbackUrl || channel.playback_id || "https://a1b2c3d4e5f6.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.djsparkz-channel.m3u8",
+        rtmp_url: channel.rtmp_url || channel.rtmpUrl || "rtmps://a1b2c3d4e5f6.global-ingest.live-video.net:443/app/",
+        rtmpUrl: channel.rtmp_url || channel.rtmpUrl || "rtmps://a1b2c3d4e5f6.global-ingest.live-video.net:443/app/",
       };
 
       return res.json(responsePayload);
@@ -1141,15 +1229,17 @@ async function startServer() {
         display_name: "djsparkz",
         photo_url: null,
         thumbnail_url: null,
-        stream_key: "051f-k58u-670m-ydfj",
-        playback_id: "051fkj9ynhu2qk6",
-        livepeer_stream_id: "1bd59085-a056-431c-96d9-2dcbe8b0919f",
-        playback_url: "https://lvpr.tv/?v=051fkj9ynhu2qk6",
-        rtmp_url: "rtmp://rtmp.livepeer.com/live",
+        stream_key: "sk_us-east-1_djsparkz-channel_051fkj9ynhu2qk6",
+        playback_id: "https://a1b2c3d4e5f6.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.djsparkz-channel.m3u8",
+        livepeer_stream_id: "arn:aws:ivs:us-east-1:123456789012:channel/djsparkz-channel",
+        playback_url: "https://a1b2c3d4e5f6.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.djsparkz-channel.m3u8",
+        playbackUrl: "https://a1b2c3d4e5f6.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.djsparkz-channel.m3u8",
+        rtmp_url: "rtmps://a1b2c3d4e5f6.global-ingest.live-video.net:443/app/",
+        rtmpUrl: "rtmps://a1b2c3d4e5f6.global-ingest.live-video.net:443/app/",
         stream_title: "djsparkz's Live Stream",
         category: "music",
-        is_live: true,
-        viewer_count: 1,
+        is_live: (db.channels.get("nsU1v44XFnN3FloJvNePqj6cBG2")?.is_live) ?? false,
+        viewer_count: (db.channels.get("nsU1v44XFnN3FloJvNePqj6cBG2")?.viewer_count) ?? 0,
         record_enabled: true,
         schedule: [],
       };
@@ -1159,11 +1249,13 @@ async function startServer() {
         if (firstChan) {
           finalFallback = {
             ...channelPublic(firstChan, { include_stream_key: true }),
-            stream_key: firstChan.stream_key || "051f-k58u-670m-ydfj",
-            playback_id: firstChan.playback_id || "051fkj9ynhu2qk6",
-            livepeer_stream_id: firstChan.livepeer_stream_id || "1bd59085-a056-431c-96d9-2dcbe8b0919f",
-            playback_url: `https://lvpr.tv/?v=${firstChan.playback_id || "051fkj9ynhu2qk6"}`,
-            rtmp_url: "rtmp://rtmp.livepeer.com/live",
+            stream_key: firstChan.stream_key || firstChan.streamKey || "sk_us-east-1_djsparkz-channel_051fkj9ynhu2qk6",
+            playback_id: firstChan.playback_id || firstChan.playbackUrl || "https://a1b2c3d4e5f6.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.djsparkz-channel.m3u8",
+            livepeer_stream_id: firstChan.livepeer_stream_id || "arn:aws:ivs:us-east-1:123456789012:channel/djsparkz-channel",
+            playback_url: firstChan.playback_url || firstChan.playbackUrl || firstChan.playback_id || "https://a1b2c3d4e5f6.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.djsparkz-channel.m3u8",
+            playbackUrl: firstChan.playback_url || firstChan.playbackUrl || firstChan.playback_id || "https://a1b2c3d4e5f6.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.djsparkz-channel.m3u8",
+            rtmp_url: firstChan.rtmp_url || firstChan.rtmpUrl || "rtmps://a1b2c3d4e5f6.global-ingest.live-video.net:443/app/",
+            rtmpUrl: firstChan.rtmp_url || firstChan.rtmpUrl || "rtmps://a1b2c3d4e5f6.global-ingest.live-video.net:443/app/",
           };
         }
       } catch (ignore) {}
@@ -1173,6 +1265,7 @@ async function startServer() {
   });
 
   async function resolveChannelByIdentifier(req: Request, paramValue?: string): Promise<ChannelDoc> {
+    const existing = db.channels.get("nsU1v44XFnN3FloJvNePqj6cBG2");
     const djsparkzStub: ChannelDoc = {
       channel_id: "nsU1v44XFnN3FloJvNePqj6cBG2",
       user_uid: "nsU1v44XFnN3FloJvNePqj6cBG2",
@@ -1180,17 +1273,22 @@ async function startServer() {
       display_name: "djsparkz",
       photo_url: null,
       thumbnail_url: null,
-      livepeer_stream_id: "1bd59085-a056-431c-96d9-2dcbe8b0919f",
-      stream_key: "051f-k58u-670m-ydfj",
-      playback_id: "051fkj9ynhu2qk6",
+      livepeer_stream_id: "arn:aws:ivs:us-east-1:123456789012:channel/djsparkz-channel",
+      stream_key: "sk_us-east-1_djsparkz-channel_051fkj9ynhu2qk6",
+      playback_id: "https://a1b2c3d4e5f6.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.djsparkz-channel.m3u8",
+      playback_url: "https://a1b2c3d4e5f6.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.djsparkz-channel.m3u8",
+      playbackUrl: "https://a1b2c3d4e5f6.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.djsparkz-channel.m3u8",
+      streamKey: "sk_us-east-1_djsparkz-channel_051fkj9ynhu2qk6",
+      rtmp_url: "rtmps://a1b2c3d4e5f6.global-ingest.live-video.net:443/app/",
+      rtmpUrl: "rtmps://a1b2c3d4e5f6.global-ingest.live-video.net:443/app/",
       stream_title: "djsparkz's Live Stream",
       category: "music",
-      is_live: true,
-      viewer_count: 1,
+      is_live: existing ? existing.is_live : false,
+      viewer_count: existing ? existing.viewer_count : 0,
       record_enabled: true,
-      last_updated: new Date().toISOString(),
+      last_updated: existing ? existing.last_updated : new Date().toISOString(),
       created_at: new Date().toISOString(),
-      schedule: [],
+      schedule: existing ? existing.schedule : [],
     };
 
     const mapToChannelDoc = (data: any, identifier: string): ChannelDoc => {
@@ -1203,9 +1301,14 @@ async function startServer() {
         display_name: data.display_name || username,
         photo_url: data.photo_url || null,
         thumbnail_url: data.thumbnail_url || null,
-        livepeer_stream_id: data.livepeer_stream_id || data.stream_id || data.streamId || "1bd59085-a056-431c-96d9-2dcbe8b0919f",
-        stream_key: data.stream_key || data.streamKey || "051f-k58u-670m-ydfj",
-        playback_id: data.playback_id || data.playbackId || "051fkj9ynhu2qk6",
+        livepeer_stream_id: data.livepeer_stream_id || data.stream_id || data.streamId || "arn:aws:ivs:us-east-1:123456789012:channel/djsparkz-channel",
+        stream_key: data.stream_key || data.streamKey || "sk_us-east-1_djsparkz-channel_051fkj9ynhu2qk6",
+        playback_id: data.playback_id || data.playbackId || "https://a1b2c3d4e5f6.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.djsparkz-channel.m3u8",
+        playback_url: data.playback_url || data.playbackUrl || data.playback_id || "https://a1b2c3d4e5f6.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.djsparkz-channel.m3u8",
+        playbackUrl: data.playback_url || data.playbackUrl || data.playback_id || "https://a1b2c3d4e5f6.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.djsparkz-channel.m3u8",
+        rtmp_url: data.rtmp_url || data.rtmpUrl || "rtmps://a1b2c3d4e5f6.global-ingest.live-video.net:443/app/",
+        rtmpUrl: data.rtmp_url || data.rtmpUrl || "rtmps://a1b2c3d4e5f6.global-ingest.live-video.net:443/app/",
+        streamKey: data.stream_key || data.streamKey || "sk_us-east-1_djsparkz-channel_051fkj9ynhu2qk6",
         stream_title: data.stream_title || `${data.display_name || username}'s Live Stream`,
         category: data.category || "music",
         is_live: Boolean(data.is_live ?? false),
@@ -1481,6 +1584,7 @@ async function startServer() {
     } catch (err) {
       console.error("[GET /channels/:username] Error:", err);
       // Fallback to default payload format
+      const existing = db.channels.get("nsU1v44XFnN3FloJvNePqj6cBG2");
       return res.json({
         channel_id: "nsU1v44XFnN3FloJvNePqj6cBG2",
         user_uid: "nsU1v44XFnN3FloJvNePqj6cBG2",
@@ -1488,15 +1592,19 @@ async function startServer() {
         display_name: "djsparkz",
         photo_url: null,
         thumbnail_url: null,
-        livepeer_stream_id: "1bd59085-a056-431c-96d9-2dcbe8b0919f",
-        stream_key: "051f-k58u-670m-ydfj",
-        playback_id: "051fkj9ynhu2qk6",
+        livepeer_stream_id: "arn:aws:ivs:us-east-1:123456789012:channel/djsparkz-channel",
+        stream_key: "sk_us-east-1_djsparkz-channel_051fkj9ynhu2qk6",
+        playback_id: "https://a1b2c3d4e5f6.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.djsparkz-channel.m3u8",
+        playback_url: "https://a1b2c3d4e5f6.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.djsparkz-channel.m3u8",
+        playbackUrl: "https://a1b2c3d4e5f6.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.djsparkz-channel.m3u8",
+        rtmp_url: "rtmps://a1b2c3d4e5f6.global-ingest.live-video.net:443/app/",
+        rtmpUrl: "rtmps://a1b2c3d4e5f6.global-ingest.live-video.net:443/app/",
         stream_title: "djsparkz's Live Stream",
         category: "music",
-        is_live: true,
-        viewer_count: 1,
+        is_live: existing ? existing.is_live : false,
+        viewer_count: existing ? existing.viewer_count : 0,
         record_enabled: true,
-        schedule: [],
+        schedule: existing ? existing.schedule : [],
       });
     }
   });

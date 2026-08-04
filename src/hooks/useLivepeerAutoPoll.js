@@ -19,7 +19,33 @@ export function useLivepeerAutoPoll(channelIdentifier) {
             username: channelIdentifier,
           });
           if (data && typeof data.is_live === "boolean") {
-            return; // Backend already updated Firestore
+            const isLive = data.is_live;
+            const nowIso = new Date().toISOString();
+            if (!cancelled) {
+              const primaryDocId = "nsU1v44XFnN3FloJvNePqj6cBG2";
+              await setDoc(
+                doc(db, "channels", primaryDocId),
+                {
+                  is_live: isLive,
+                  isLive: isLive,
+                  last_updated: nowIso,
+                },
+                { merge: true }
+              ).catch(() => {});
+
+              if (channelIdentifier && channelIdentifier !== primaryDocId && channelIdentifier !== "djsparkz") {
+                await setDoc(
+                  doc(db, "channels", channelIdentifier),
+                  {
+                    is_live: isLive,
+                    isLive: isLive,
+                    last_updated: nowIso,
+                  },
+                  { merge: true }
+                ).catch(() => {});
+              }
+            }
+            return;
           }
         } catch {
           // Fallback if backend route fails
