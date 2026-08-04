@@ -22,27 +22,21 @@
       }
     },
     "channels": {
-      "path": "channels/{channelId}",
+      "path": "channels/{userId}",
       "description": "Live streaming channels",
       "allow": {
         "read": "true",
-        "create": "request.auth != null",
-        "update": "request.auth != null",
+        "create": "request.auth != null && request.auth.uid == userId",
+        "update": "request.auth != null && request.auth.uid == userId",
         "delete": "false"
       },
       "fields": {
-        "channel_id": { "type": "string", "required": true },
-        "user_uid": { "type": "string", "required": true },
+        "uid": { "type": "string", "required": true },
         "username": { "type": "string", "required": true },
-        "display_name": { "type": "string", "required": true },
-        "photo_url": { "type": "string", "required": false },
-        "thumbnail_url": { "type": "string", "required": false },
+        "livepeer_stream_id": { "type": "string", "required": true },
+        "stream_key": { "type": "string", "required": true },
         "playback_id": { "type": "string", "required": true },
-        "stream_title": { "type": "string", "required": true },
-        "category": { "type": "string", "required": true },
-        "is_live": { "type": "boolean", "required": true },
-        "viewer_count": { "type": "number", "required": true },
-        "last_updated": { "type": "string", "required": true }
+        "updated_at": { "type": "timestamp", "required": true }
       }
     },
     "chat_messages": {

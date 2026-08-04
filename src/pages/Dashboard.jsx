@@ -30,32 +30,13 @@ export default function Dashboard() {
   const [channel, setChannel] = useState(null);
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState("music");
-  const [reveal, setReveal] = useState(true);
+  const [reveal, setReveal] = useState(false);
   const [creatingStream, setCreatingStream] = useState(false);
   const [autoDetect, setAutoDetect] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useLivepeerAutoPoll(channel?.username);
-
-  const localKeyName = user?.uid ? `sparkz_stream_key_${user.uid}` : "sparkz_stream_key";
-  const localPlaybackName = user?.uid ? `sparkz_playback_id_${user.uid}` : "sparkz_playback_id";
-
-  // Pre-load from local storage instantly before network requests finish
-  useEffect(() => {
-    const cachedKey = localStorage.getItem(localKeyName) || localStorage.getItem("sparkz_stream_key") || "";
-    const cachedPlayback = localStorage.getItem(localPlaybackName) || localStorage.getItem("sparkz_playback_id") || "";
-
-    if (cachedKey || cachedPlayback) {
-      setChannel((prev) => ({
-        ...(prev || {}),
-        stream_key: cachedKey || prev?.stream_key || "",
-        playback_id: cachedPlayback || prev?.playback_id || "",
-        rtmp_url: prev?.rtmp_url || "rtmp://rtmp.livepeer.com/live",
-        playback_url: prev?.playback_url || (cachedPlayback ? `https://livepeercdn.studio/hls/${cachedPlayback}/index.m3u8` : ""),
-      }));
-    }
-  }, [user?.uid, localKeyName, localPlaybackName]);
 
   const load = async () => {
     if (!user) {
@@ -67,84 +48,9 @@ export default function Dashboard() {
       setError(null);
       const { data } = await api.get("/channels/mine");
       if (data) {
-        const storedKey = localStorage.getItem(localKeyName) || localStorage.getItem("sparkz_stream_key") || "";
-        const storedPlayback = localStorage.getItem(localPlaybackName) || localStorage.getItem("sparkz_playback_id") || "";
-
-        const finalKey = data.stream_key || storedKey || "";
-        const finalPlayback = data.playback_id || storedPlayback || "";
-
-        if (finalKey) {
-          localStorage.setItem(localKeyName, finalKey);
-          localStorage.setItem("sparkz_stream_key", finalKey);
-        }
-        if (finalPlayback) {
-          localStorage.setItem(localPlaybackName, finalPlayback);
-          localStorage.setItem("sparkz_playback_id", finalPlayback);
-        }
-
-        setChannel((prev) => ({
-          ...(prev || {}),
-          ...data,
-          stream_key: finalKey || prev?.stream_key || "",
-          playback_id: finalPlayback || prev?.playback_id || "",
-          livepeer_stream_id: data.livepeer_stream_id || prev?.livepeer_stream_id || "",
-          rtmp_url: data.rtmp_url || prev?.rtmp_url || "rtmp://rtmp.livepeer.com/live",
-          playback_url:
-            data.playback_url ||
-            prev?.playback_url ||
-            (finalPlayback
-              ? `https://livepeercdn.studio/hls/${finalPlayback}/index.m3u8`
-              : ""),
-        }));
+        setChannel(data);
         setTitle(data.stream_title || "");
         setCategory(data.category || "music");
-
-        // Automatically fetch/ensure permanent stream key if missing from backend and cache
-        if (!finalKey || !finalPlayback) {
-          const res = await api.post("/stream/create", { forceNew: false });
-          if (res.data && res.data.channel) {
-            const k = res.data.channel.stream_key || "";
-            const p = res.data.channel.playback_id || "";
-            if (k) {
-              localStorage.setItem(localKeyName, k);
-              localStorage.setItem("sparkz_stream_key", k);
-            }
-            if (p) {
-              localStorage.setItem(localPlaybackName, p);
-              localStorage.setItem("sparkz_playback_id", p);
-            }
-
-            setChannel((prev) => ({
-              ...(prev || {}),
-              ...res.data.channel,
-              stream_key: k || prev?.stream_key || "",
-              playback_id: p || prev?.playback_id || "",
-              rtmp_url: res.data.channel.rtmp_url || prev?.rtmp_url || "rtmp://rtmp.livepeer.com/live",
-            }));
-          } else if (res.data && res.data.stream_key) {
-            const k = res.data.stream_key;
-            const p = res.data.playback_id;
-            if (k) {
-              localStorage.setItem(localKeyName, k);
-              localStorage.setItem("sparkz_stream_key", k);
-            }
-            if (p) {
-              localStorage.setItem(localPlaybackName, p);
-              localStorage.setItem("sparkz_playback_id", p);
-            }
-
-            setChannel((prev) => ({
-              ...(prev || {}),
-              stream_key: k,
-              playback_id: p,
-              livepeer_stream_id: res.data.livepeer_stream_id,
-              rtmp_url: res.data.rtmp_url || prev?.rtmp_url || "rtmp://rtmp.livepeer.com/live",
-              playback_url:
-                res.data.playback_url ||
-                `https://livepeercdn.studio/hls/${p}/index.m3u8`,
-            }));
-          }
-        }
       } else {
         setError("No channel metadata returned from server.");
       }
@@ -168,7 +74,7 @@ export default function Dashboard() {
     }
   }, [user]);
 
-  // Poll for auto-detected go-live from Livepeer while dashboard is open
+  // Poll for auto-detected go-live status while dashboard is open
   useEffect(() => {
     const t = setInterval(() => {
       api
@@ -184,23 +90,9 @@ export default function Dashboard() {
                   : "AUTO-DETECT: signal dropped."
               );
             }
-            const mergedKey = data.stream_key || prev.stream_key || "";
-            const mergedPlaybackId = data.playback_id || prev.playback_id || "";
-            const mergedStreamId = data.livepeer_stream_id || prev.livepeer_stream_id || "";
-            const mergedRtmp = data.rtmp_url || prev.rtmp_url || "rtmp://rtmp.livepeer.com/live";
-            const mergedPlaybackUrl =
-              data.playback_url ||
-              prev.playback_url ||
-              (mergedPlaybackId ? `https://livepeercdn.studio/hls/${mergedPlaybackId}/index.m3u8` : "");
-
             return {
               ...prev,
               ...data,
-              stream_key: mergedKey,
-              playback_id: mergedPlaybackId,
-              livepeer_stream_id: mergedStreamId,
-              rtmp_url: mergedRtmp,
-              playback_url: mergedPlaybackUrl,
             };
           });
         })
@@ -222,28 +114,10 @@ export default function Dashboard() {
       if (user?.uid) {
         updateUserProfileInFirestore(user.uid, { thumbnail_url: channel?.thumbnail_url || null }).catch(() => {});
       }
-      const finalKey = data.stream_key || channel?.stream_key || "";
-      const finalPlayback = data.playback_id || channel?.playback_id || "";
-
-      if (finalKey) {
-        localStorage.setItem(localKeyName, finalKey);
-        localStorage.setItem("sparkz_stream_key", finalKey);
-      }
-      if (finalPlayback) {
-        localStorage.setItem(localPlaybackName, finalPlayback);
-        localStorage.setItem("sparkz_playback_id", finalPlayback);
-      }
 
       setChannel((prev) => ({
         ...(prev || {}),
         ...data,
-        stream_key: finalKey,
-        playback_id: finalPlayback,
-        rtmp_url: data.rtmp_url || prev?.rtmp_url || "rtmp://rtmp.livepeer.com/live",
-        playback_url:
-          data.playback_url ||
-          prev?.playback_url ||
-          (finalPlayback ? `https://livepeercdn.studio/hls/${finalPlayback}/index.m3u8` : ""),
       }));
       toast.success("Channel updated.");
     } catch (e) {
@@ -255,123 +129,15 @@ export default function Dashboard() {
   const createStream = async (forceNew = true) => {
     setCreatingStream(true);
     try {
-      // Primary: call backend endpoint to fetch or create stream key and persist in database
-      let data = null;
-      try {
-        const res = await api.post("/stream/create", { forceNew });
-        data = res?.data;
-      } catch (backendErr) {
-        console.warn("Primary /stream/create endpoint failed, attempting fallback methods...", backendErr);
-      }
-
-      if (data && (data.channel || data.stream_key)) {
-        const newKey = data.stream_key || data.channel?.stream_key || "";
-        const newPlaybackId = data.playback_id || data.channel?.playback_id || "";
-        const newStreamId = data.livepeer_stream_id || data.channel?.livepeer_stream_id || "";
-        const newRtmp = data.rtmp_url || data.channel?.rtmp_url || "rtmp://rtmp.livepeer.com/live";
-        const newPlaybackUrl =
-          data.playback_url ||
-          data.channel?.playback_url ||
-          `https://livepeercdn.studio/hls/${newPlaybackId}/index.m3u8`;
-
-        if (newKey) localStorage.setItem(localKeyName, newKey);
-        if (newPlaybackId) localStorage.setItem(localPlaybackName, newPlaybackId);
-
+      const { data } = await api.post("/stream/create", { forceNew });
+      if (data) {
         setChannel((prev) => ({
           ...(prev || {}),
-          ...(data.channel || {}),
-          stream_key: newKey || prev?.stream_key || "",
-          playback_id: newPlaybackId || prev?.playback_id || "",
-          livepeer_stream_id: newStreamId || prev?.livepeer_stream_id || "",
-          rtmp_url: newRtmp,
-          playback_url: newPlaybackUrl,
+          ...data,
         }));
         setReveal(true);
-
-        // Explicitly persist to /channels/mine
-        await api.patch("/channels/mine", {
-          stream_key: newKey,
-          playback_id: newPlaybackId,
-          livepeer_stream_id: newStreamId,
-        }).catch(() => {});
-
-        toast.success(forceNew ? "New permanent Livepeer key generated & saved!" : "Permanent stream key loaded.");
-        return;
+        toast.success("Stream credentials synchronized.");
       }
-
-      // Fallback 1: livepeer streams endpoint on standalone backend
-      let response = null;
-      try {
-        const res = await api.post("/livepeer/streams", { name: `${channel?.username || "stream"}-session` });
-        if (res && res.data) {
-          response = { ok: true, json: () => Promise.resolve(res.data) };
-        }
-      } catch (fnErr) {
-        console.warn("Backend /livepeer/streams fetch failed, attempting backup...", fnErr);
-        try {
-          response = await fetch("/livepeer/streams", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name: `${channel?.username || "stream"}-session` }),
-          });
-        } catch (localErr) {
-          console.warn("Local fallback failed:", localErr);
-        }
-      }
-
-      if (response && response.ok) {
-        const streamData = await response.json();
-        const newKey = streamData.streamKey || streamData.stream_key || "";
-        const newPlaybackId = streamData.playbackId || streamData.playback_id || "";
-        const newStreamId = streamData.id || "";
-        const newRtmp = streamData.rtmp_url || "rtmp://rtmp.livepeer.com/live";
-        const newPlaybackUrl =
-          streamData.playback_url || `https://livepeercdn.studio/hls/${newPlaybackId}/index.m3u8`;
-
-        setChannel((prev) => ({
-          ...(prev || {}),
-          stream_key: newKey,
-          playback_id: newPlaybackId,
-          livepeer_stream_id: newStreamId,
-          rtmp_url: newRtmp,
-          playback_url: newPlaybackUrl,
-        }));
-        setReveal(true);
-
-        // Save to backend database so it persists across refreshes
-        await api.patch("/channels/mine", {
-          stream_key: newKey,
-          playback_id: newPlaybackId,
-          livepeer_stream_id: newStreamId,
-        }).catch(() => {});
-
-        toast.success("Livepeer stream key saved permanently!");
-        return;
-      }
-
-      // Fallback 2: Local fallback key generation if external APIs or DB sync fail
-      const fallbackKey =
-        channel?.stream_key ||
-        `sk_${Math.random().toString(36).substring(2, 14)}${Date.now().toString(36)}`;
-      const fallbackPlaybackId = channel?.playback_id || Math.random().toString(36).substring(2, 10);
-      const fallbackRtmp = "rtmp://rtmp.livepeer.com/live";
-      const fallbackPlaybackUrl = `https://livepeercdn.studio/hls/${fallbackPlaybackId}/index.m3u8`;
-
-      setChannel((prev) => ({
-        ...(prev || {}),
-        stream_key: fallbackKey,
-        playback_id: fallbackPlaybackId,
-        rtmp_url: fallbackRtmp,
-        playback_url: fallbackPlaybackUrl,
-      }));
-      setReveal(true);
-
-      await api.patch("/channels/mine", {
-        stream_key: fallbackKey,
-        playback_id: fallbackPlaybackId,
-      }).catch(() => {});
-
-      toast.success("Permanent stream key created (fallback mode).");
     } catch (error) {
       console.error("Stream operation error:", error);
       toast.error("Unable to update stream key. Please try again.");
@@ -574,10 +340,9 @@ export default function Dashboard() {
               <CredentialRow
                 label="PLAYBACK URL"
                 value={
-                  channel.playback_url ||
-                  (channel.playback_id
-                    ? `https://livepeer.com/playback/${channel.playback_id}/index.m3u8`
-                    : "")
+                  channel.playback_id
+                    ? `https://lvpr.tv/?v=${channel.playback_id}`
+                    : ""
                 }
                 onCopy={copy}
                 testid="playback-url"
