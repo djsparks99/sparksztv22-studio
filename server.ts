@@ -557,8 +557,36 @@ async function deleteEmoteFromFirestore(id: string) {
   }
 }
 
-async function updateFirestoreChannelLiveStatus(docId: string, isLive: boolean, timestamp: string) {
+async function updateFirestoreChannelLiveStatus(
+  docId: string,
+  isLive: boolean,
+  timestamp: string,
+  playbackId?: string,
+  playbackUrl?: string,
+  livepeerStreamId?: string,
+  streamKey?: string
+) {
   if (!docId) return;
+
+  const updateFields: any = {
+    is_live: isLive,
+    isLive: isLive,
+    last_updated: timestamp,
+  };
+  if (playbackId) {
+    updateFields.playback_id = playbackId;
+    updateFields.playbackId = playbackId;
+  }
+  if (playbackUrl) {
+    updateFields.playback_url = playbackUrl;
+    updateFields.playbackUrl = playbackUrl;
+  }
+  if (livepeerStreamId) {
+    updateFields.livepeer_stream_id = livepeerStreamId;
+  }
+  if (streamKey) {
+    updateFields.stream_key = streamKey;
+  }
 
   // 1. Try Firebase Admin SDK first (bypasses security rules)
   if (admin && admin.apps && admin.apps.length) {
@@ -566,22 +594,11 @@ async function updateFirestoreChannelLiveStatus(docId: string, isLive: boolean, 
       const db = admin.firestore();
       const docRef = db.collection("channels").doc(docId);
       try {
-        await docRef.update({
-          is_live: isLive,
-          isLive: isLive,
-          last_updated: timestamp,
-        });
+        await docRef.update(updateFields);
       } catch {
-        await docRef.set(
-          {
-            is_live: isLive,
-            isLive: isLive,
-            last_updated: timestamp,
-          },
-          { merge: true }
-        );
+        await docRef.set(updateFields, { merge: true });
       }
-      console.log(`[Firebase Admin SDK] Document "channels/${docId}" updated successfully: is_live=${isLive}`);
+      console.log(`[Firebase Admin SDK] Document "channels/${docId}" updated successfully:`, updateFields);
       return;
     } catch (adminErr) {
       console.error(`[Firebase Admin SDK Error] Could not update "channels/${docId}":`, adminErr);
@@ -592,21 +609,43 @@ async function updateFirestoreChannelLiveStatus(docId: string, isLive: boolean, 
   if (!firebaseConfig.projectId || !firebaseConfig.apiKey) return;
   try {
     const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
-    const url = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents/channels/${docId}?updateMask.fieldPaths=is_live&updateMask.fieldPaths=isLive&updateMask.fieldPaths=last_updated&key=${firebaseConfig.apiKey}`;
+    const updateMasks = ["is_live", "isLive", "last_updated"];
+    const fields: any = {
+      is_live: { booleanValue: isLive },
+      isLive: { booleanValue: isLive },
+      last_updated: { stringValue: timestamp },
+    };
+    if (playbackId) {
+      updateMasks.push("playback_id");
+      updateMasks.push("playbackId");
+      fields.playback_id = { stringValue: playbackId };
+      fields.playbackId = { stringValue: playbackId };
+    }
+    if (playbackUrl) {
+      updateMasks.push("playback_url");
+      updateMasks.push("playbackUrl");
+      fields.playback_url = { stringValue: playbackUrl };
+      fields.playbackUrl = { stringValue: playbackUrl };
+    }
+    if (livepeerStreamId) {
+      updateMasks.push("livepeer_stream_id");
+      fields.livepeer_stream_id = { stringValue: livepeerStreamId };
+    }
+    if (streamKey) {
+      updateMasks.push("stream_key");
+      fields.stream_key = { stringValue: streamKey };
+    }
+
+    const maskParams = updateMasks.map((p) => `updateMask.fieldPaths=${p}`).join("&");
+    const url = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents/channels/${docId}?${maskParams}&key=${firebaseConfig.apiKey}`;
     const res = await fetch(url, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        fields: {
-          is_live: { booleanValue: isLive },
-          isLive: { booleanValue: isLive },
-          last_updated: { stringValue: timestamp },
-        },
-      }),
+      body: JSON.stringify({ fields }),
     });
 
     if (res.ok) {
-      console.log(`[REST Fallback] Firestore document "channels/${docId}" updated successfully: is_live=${isLive}`);
+      console.log(`[REST Fallback] Firestore document "channels/${docId}" updated successfully.`);
     } else {
       const errText = await res.text();
       console.error(`[REST Fallback] Firestore update error for "channels/${docId}" (HTTP ${res.status}):`, errText);
@@ -616,11 +655,39 @@ async function updateFirestoreChannelLiveStatus(docId: string, isLive: boolean, 
   }
 }
 
-async function queryAndUpdateFirestoreChannels(searchKeys: string[], isLive: boolean, timestamp: string) {
+async function queryAndUpdateFirestoreChannels(
+  searchKeys: string[],
+  isLive: boolean,
+  timestamp: string,
+  playbackId?: string,
+  playbackUrl?: string,
+  livepeerStreamId?: string,
+  streamKey?: string
+) {
   const validKeys = searchKeys.filter(Boolean).map((s) => String(s).trim().toLowerCase());
   if (validKeys.length === 0) return;
 
   console.log("Searching Firestore channels collection with search keys:", validKeys);
+
+  const updateFields: any = {
+    is_live: isLive,
+    isLive: isLive,
+    last_updated: timestamp,
+  };
+  if (playbackId) {
+    updateFields.playback_id = playbackId;
+    updateFields.playbackId = playbackId;
+  }
+  if (playbackUrl) {
+    updateFields.playback_url = playbackUrl;
+    updateFields.playbackUrl = playbackUrl;
+  }
+  if (livepeerStreamId) {
+    updateFields.livepeer_stream_id = livepeerStreamId;
+  }
+  if (streamKey) {
+    updateFields.stream_key = streamKey;
+  }
 
   // Strategy 1: Firebase Admin SDK
   if (admin && admin.apps && admin.apps.length) {
@@ -635,33 +702,26 @@ async function queryAndUpdateFirestoreChannels(searchKeys: string[], isLive: boo
         const data = doc.data() || {};
         const channelId = String(data.channel_id || data.channelId || "").toLowerCase();
         const username = String(data.username || "").toLowerCase();
-        const livepeerStreamId = String(
+        const livepeerStreamIdField = String(
           data.livepeer_stream_id || data.stream_id || data.streamId || data.id || ""
         ).toLowerCase();
-        const playbackId = String(data.playback_id || data.playbackId || "").toLowerCase();
-        const streamKey = String(data.stream_key || data.streamKey || "").toLowerCase();
+        const playbackIdField = String(data.playback_id || data.playbackId || "").toLowerCase();
+        const streamKeyField = String(data.stream_key || data.streamKey || "").toLowerCase();
 
         const matches = validKeys.some(
           (k) =>
             docId.toLowerCase() === k ||
             (channelId && channelId === k) ||
             (username && username === k) ||
-            (livepeerStreamId && livepeerStreamId === k) ||
-            (playbackId && playbackId === k) ||
-            (streamKey && streamKey === k) ||
-            (k.length > 3 && (channelId.includes(k) || k.includes(channelId) || playbackId.includes(k) || k.includes(playbackId)))
+            (livepeerStreamIdField && livepeerStreamIdField === k) ||
+            (playbackIdField && playbackIdField === k) ||
+            (streamKeyField && streamKeyField === k) ||
+            (k.length > 3 && (channelId.includes(k) || k.includes(channelId) || playbackIdField.includes(k) || k.includes(playbackIdField)))
         );
 
         if (matches) {
-          console.log(`[Firebase Admin SDK] Match found for docId="${docId}". Updating is_live=${isLive}`);
-          await doc.ref.set(
-            {
-              is_live: isLive,
-              isLive: isLive,
-              last_updated: timestamp,
-            },
-            { merge: true }
-          );
+          console.log(`[Firebase Admin SDK] Match found for docId="${docId}". Updating with dynamic streaming details.`);
+          await doc.ref.set(updateFields, { merge: true });
           updatedCount++;
         }
       }
@@ -701,29 +761,37 @@ async function queryAndUpdateFirestoreChannels(searchKeys: string[], isLive: boo
   for (const [docId, fields] of foundDocsMap.entries()) {
     const channelId = String(fields.channel_id?.stringValue || fields.channelId?.stringValue || "").toLowerCase();
     const username = String(fields.username?.stringValue || "").toLowerCase();
-    const livepeerStreamId = String(
+    const livepeerStreamIdField = String(
       fields.livepeer_stream_id?.stringValue ||
       fields.stream_id?.stringValue ||
       fields.streamId?.stringValue ||
       fields.id?.stringValue ||
       ""
     ).toLowerCase();
-    const playbackId = String(fields.playback_id?.stringValue || fields.playbackId?.stringValue || "").toLowerCase();
-    const streamKey = String(fields.stream_key?.stringValue || fields.streamKey?.stringValue || "").toLowerCase();
+    const playbackIdField = String(fields.playback_id?.stringValue || fields.playbackId?.stringValue || "").toLowerCase();
+    const streamKeyField = String(fields.stream_key?.stringValue || fields.streamKey?.stringValue || "").toLowerCase();
 
     const matches = validKeys.some(
       (k) =>
         docId.toLowerCase() === k ||
         (channelId && channelId === k) ||
         (username && username === k) ||
-        (livepeerStreamId && livepeerStreamId === k) ||
-        (playbackId && playbackId === k) ||
-        (streamKey && streamKey === k) ||
-        (k.length > 3 && (channelId.includes(k) || k.includes(channelId) || playbackId.includes(k) || k.includes(playbackId)))
+        (livepeerStreamIdField && livepeerStreamIdField === k) ||
+        (playbackIdField && playbackIdField === k) ||
+        (streamKeyField && streamKeyField === k) ||
+        (k.length > 3 && (channelId.includes(k) || k.includes(channelId) || playbackIdField.includes(k) || k.includes(playbackIdField)))
     );
 
     if (matches) {
-      await updateFirestoreChannelLiveStatus(docId, isLive, timestamp);
+      await updateFirestoreChannelLiveStatus(
+        docId,
+        isLive,
+        timestamp,
+        playbackId,
+        playbackUrl,
+        livepeerStreamId,
+        streamKey
+      );
       updatedCount++;
     }
   }
@@ -1726,10 +1794,22 @@ async function startServer() {
       }
 
       const timestamp = new Date().toISOString();
+      const playbackUrl = playbackId && playbackId !== "undefined" && playbackId !== "null"
+        ? `https://livepeercdn.studio/hls/${playbackId}/index.m3u8`
+        : "";
 
       if (matchedChannel) {
         matchedChannel.is_live = isLive;
         matchedChannel.last_updated = timestamp;
+        if (playbackId && playbackId !== "undefined" && playbackId !== "null" && playbackId.trim() !== "") {
+          matchedChannel.playback_id = playbackId;
+        }
+        if (streamId && streamId !== "undefined" && streamId !== "null" && streamId.trim() !== "") {
+          matchedChannel.livepeer_stream_id = streamId;
+        }
+        if (streamKey && streamKey !== "undefined" && streamKey !== "null" && streamKey.trim() !== "") {
+          matchedChannel.stream_key = streamKey;
+        }
         if (isLive) {
           matchedChannel.stream_started_at = timestamp;
         } else {
@@ -1744,8 +1824,24 @@ async function startServer() {
         await syncChannelToFirestore(matchedChannel);
 
         // Explicitly update matching document fields in channels collection
-        await updateFirestoreChannelLiveStatus(matchedChannel.channel_id, isLive, timestamp);
-        await updateFirestoreChannelLiveStatus(matchedChannel.username, isLive, timestamp);
+        await updateFirestoreChannelLiveStatus(
+          matchedChannel.channel_id,
+          isLive,
+          timestamp,
+          matchedChannel.playback_id,
+          matchedChannel.playback_id ? `https://livepeercdn.studio/hls/${matchedChannel.playback_id}/index.m3u8` : "",
+          matchedChannel.livepeer_stream_id,
+          matchedChannel.stream_key
+        );
+        await updateFirestoreChannelLiveStatus(
+          matchedChannel.username,
+          isLive,
+          timestamp,
+          matchedChannel.playback_id,
+          matchedChannel.playback_id ? `https://livepeercdn.studio/hls/${matchedChannel.playback_id}/index.m3u8` : "",
+          matchedChannel.livepeer_stream_id,
+          matchedChannel.stream_key
+        );
 
         console.log(`Livepeer Webhook: Synced channel ${matchedChannel.username} (is_live=${isLive}) to Firestore`);
       }
@@ -1756,28 +1852,33 @@ async function startServer() {
         try {
           const adminDb = admin.firestore();
           const targetDocRef = adminDb.collection("channels").doc(targetDocId);
-          try {
-            await targetDocRef.update({
-              is_live: isLive,
-              isLive: isLive,
-              last_updated: new Date().toISOString(),
-            });
-          } catch {
-            await targetDocRef.set(
-              {
-                is_live: isLive,
-                isLive: isLive,
-                last_updated: new Date().toISOString(),
-              },
-              { merge: true }
-            );
+          const updateFields: any = {
+            is_live: isLive,
+            isLive: isLive,
+            last_updated: timestamp,
+          };
+          if (playbackId && playbackId !== "undefined" && playbackId !== "null") {
+            updateFields.playback_id = playbackId;
+            updateFields.playbackId = playbackId;
+            updateFields.playback_url = playbackUrl;
           }
-          console.log(`[Firebase Admin SDK Direct Update Success] Updated channels/${targetDocId}: is_live=${isLive}, isLive=${isLive}`);
+          if (streamId && streamId !== "undefined" && streamId !== "null") {
+            updateFields.livepeer_stream_id = streamId;
+          }
+          if (streamKey && streamKey !== "undefined" && streamKey !== "null") {
+            updateFields.stream_key = streamKey;
+          }
+          try {
+            await targetDocRef.update(updateFields);
+          } catch {
+            await targetDocRef.set(updateFields, { merge: true });
+          }
+          console.log(`[Firebase Admin SDK Direct Update Success] Updated channels/${targetDocId}: is_live=${isLive}`);
         } catch (adminErr) {
           console.error(`[Firebase Admin SDK Direct Update Error] Failed updating channels/${targetDocId}:`, adminErr);
         }
       } else {
-        await updateFirestoreChannelLiveStatus(targetDocId, isLive, timestamp);
+        await updateFirestoreChannelLiveStatus(targetDocId, isLive, timestamp, playbackId, playbackUrl, streamId, streamKey);
       }
 
       // Query and update all matching documents in Firestore channels collection
@@ -1791,7 +1892,7 @@ async function startServer() {
         matchedChannel?.username,
       ].filter((k): k is string => Boolean(k));
 
-      await queryAndUpdateFirestoreChannels(searchKeys, isLive, timestamp);
+      await queryAndUpdateFirestoreChannels(searchKeys, isLive, timestamp, playbackId, playbackUrl, streamId, streamKey);
 
       console.log(`[CONFIRMATION EXECUTED] Livepeer webhook finished processing successfully via Firebase Admin SDK. Updated channels/${targetDocId} to is_live=${isLive}`);
 
@@ -1856,7 +1957,7 @@ async function startServer() {
       }
 
       const activeStreamId = stream_id || matchedChannel?.livepeer_stream_id;
-      const activePlaybackId = playback_id || matchedChannel?.playback_id;
+      let activePlaybackId = playback_id || matchedChannel?.playback_id;
 
       if (apiKey && activeStreamId) {
         try {
@@ -1866,6 +1967,12 @@ async function startServer() {
           if (lpRes.ok) {
             const lpData = await lpRes.json();
             isLive = Boolean(lpData.isActive || lpData.is_active || lpData.health?.status === "healthy");
+            if (lpData.playbackId && lpData.playbackId !== "undefined" && lpData.playbackId !== "null" && String(lpData.playbackId).trim() !== "") {
+              activePlaybackId = lpData.playbackId;
+              if (matchedChannel) {
+                matchedChannel.playback_id = lpData.playbackId;
+              }
+            }
             livepeerChecked = true;
           }
         } catch (e) {
@@ -1889,10 +1996,16 @@ async function startServer() {
       }
 
       const timestamp = new Date().toISOString();
+      const activePlaybackUrl = activePlaybackId && activePlaybackId !== "undefined" && activePlaybackId !== "null"
+        ? `https://livepeercdn.studio/hls/${activePlaybackId}/index.m3u8`
+        : "";
 
       if (matchedChannel) {
         matchedChannel.is_live = isLive;
         matchedChannel.last_updated = timestamp;
+        if (activePlaybackId && activePlaybackId !== "undefined" && activePlaybackId !== "null" && activePlaybackId.trim() !== "") {
+          matchedChannel.playback_id = activePlaybackId;
+        }
         if (isLive && !matchedChannel.stream_started_at) {
           matchedChannel.stream_started_at = timestamp;
         } else if (!isLive) {
@@ -1917,20 +2030,31 @@ async function startServer() {
         try {
           const adminDb = admin.firestore();
           const targetDocRef = adminDb.collection("channels").doc(targetDocId);
-          await targetDocRef.set(
-            {
-              is_live: isLive,
-              isLive: isLive,
-              last_updated: timestamp,
-            },
-            { merge: true }
-          );
+          const updateFields: any = {
+            is_live: isLive,
+            isLive: isLive,
+            last_updated: timestamp,
+          };
+          if (activePlaybackId && activePlaybackId !== "undefined" && activePlaybackId !== "null") {
+            updateFields.playback_id = activePlaybackId;
+            updateFields.playbackId = activePlaybackId;
+            updateFields.playback_url = activePlaybackUrl;
+          }
+          await targetDocRef.set(updateFields, { merge: true });
         } catch (adminErr) {
           console.error(`[Livepeer AutoPoll Admin SDK Direct Error]:`, adminErr);
         }
       }
 
-      await queryAndUpdateFirestoreChannels(searchKeys, isLive, timestamp);
+      await queryAndUpdateFirestoreChannels(
+        searchKeys,
+        isLive,
+        timestamp,
+        activePlaybackId,
+        activePlaybackUrl,
+        activeStreamId,
+        matchedChannel?.stream_key
+      );
 
       return res.status(200).json({
         success: true,
@@ -3650,7 +3774,7 @@ async function startServer() {
 
   server.on("upgrade", (request, socket, head) => {
     const url = new URL(request.url || "", `http://${request.headers.host}`);
-    if (url.pathname.startsWith("/api/ws/chat/")) {
+    if (url.pathname.startsWith("/api/ws/chat/") || url.pathname.startsWith("/ws/chat/")) {
       wss.handleUpgrade(request, socket, head, (ws) => {
         wss.emit("connection", ws, request);
       });
@@ -3662,7 +3786,7 @@ async function startServer() {
   wss.on("connection", async (ws: WebSocket, request: http.IncomingMessage) => {
     const url = new URL(request.url || "", `http://${request.headers.host}`);
     const channelUsername = decodeURIComponent(
-      url.pathname.replace("/api/ws/chat/", "")
+      url.pathname.replace("/api/ws/chat/", "").replace("/ws/chat/", "")
     ).toLowerCase();
     const token = url.searchParams.get("token");
 
