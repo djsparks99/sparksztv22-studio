@@ -843,48 +843,82 @@ async function getOrRestoreUserChannel(user: UserDoc): Promise<ChannelDoc> {
     return chan;
   }
 
-  for (const c of db.channels.values()) {
-    if (c.user_uid === user.uid || (c.username && c.username.toLowerCase() === user.username.toLowerCase())) {
-      return c;
-    }
-  }
-
-  // Check Firestore directly for persistent stream credentials
+  // 1. FIRESTORE LOOKUP FIRST: When any user opens their dashboard or initializes,
+  // the server MUST query Firestore first to see if a channel document already exists for that user_uid.
   if (admin && admin.apps && admin.apps.length) {
     try {
       const dbFs = admin.firestore();
-      const doc = await dbFs.collection("channels").doc(user.uid).get();
-      if (doc.exists) {
-        const data = doc.data() || {};
-        if (data.playback_id && data.stream_key) {
+      
+      // Look up by doc ID = user.uid
+      let doc = await dbFs.collection("channels").doc(user.uid).get();
+      let data = doc.exists ? doc.data() : null;
+
+      // Look up by user_uid query
+      if (!data) {
+        const querySnap = await dbFs.collection("channels").where("user_uid", "==", user.uid).limit(1).get();
+        if (!querySnap.empty) {
+          doc = querySnap.docs[0];
+          data = doc.data();
+        }
+      }
+
+      // Look up by username query
+      if (!data && user.username) {
+        const querySnap = await dbFs.collection("channels").where("username", "==", user.username).limit(1).get();
+        if (!querySnap.empty) {
+          doc = querySnap.docs[0];
+          data = doc.data();
+        }
+      }
+
+      if (data) {
+        // 2. LOAD EXISTING CREDENTIALS: If a channel document exists in Firestore and contains a stream_id/livepeer_stream_id and playback_id,
+        // the server MUST load those exact stored values and use them. It is strictly forbidden to call Livepeer's stream creation endpoint if a record already exists in the database.
+        const loadedPlaybackId = data.playback_id || data.playbackId || "";
+        const loadedStreamKey = data.stream_key || data.streamKey || "";
+        const loadedStreamId = data.livepeer_stream_id || data.stream_id || data.streamId || "";
+
+        if (loadedPlaybackId || loadedStreamKey || loadedStreamId) {
+          console.log(`[Firestore First] Found existing persistent stream credentials for user ${user.username} (UID: ${user.uid}): playback_id="${loadedPlaybackId}", stream_id="${loadedStreamId}"`);
+          
           const channelObj: ChannelDoc = {
-            channel_id: user.uid,
-            user_uid: user.uid,
-            username: user.username,
-            display_name: user.display_name || data.display_name || user.username,
-            photo_url: user.photo_url || data.photo_url || null,
+            channel_id: doc.id || user.uid,
+            user_uid: data.user_uid || user.uid,
+            username: data.username || user.username,
+            display_name: data.display_name || user.display_name || data.username || user.username,
+            photo_url: data.photo_url || user.photo_url || null,
             thumbnail_url: data.thumbnail_url || null,
-            livepeer_stream_id: data.livepeer_stream_id || "",
-            stream_key: data.stream_key || "",
-            playback_id: data.playback_id || "",
-            stream_title: data.stream_title || `${user.display_name}'s Live Stream`,
+            livepeer_stream_id: loadedStreamId || "",
+            stream_key: loadedStreamKey || "",
+            playback_id: loadedPlaybackId || "",
+            stream_title: data.stream_title || `${data.display_name || user.display_name || user.username}'s Live Stream`,
             category: data.category || "music",
-            is_live: Boolean(data.is_live ?? false),
+            is_live: Boolean(data.is_live ?? data.isLive ?? false),
             viewer_count: typeof data.viewer_count === "number" ? data.viewer_count : 0,
             schedule: data.schedule || [],
             last_updated: data.last_updated || new Date().toISOString(),
             created_at: data.created_at || new Date().toISOString(),
           };
-          db.channels.set(user.uid, channelObj);
+
+          db.channels.set(channelObj.channel_id, channelObj);
           return channelObj;
         }
       }
     } catch (fsErr) {
-      console.error("[getOrRestoreUserChannel] Failed to fetch existing channel from Firestore:", fsErr);
+      console.error("[getOrRestoreUserChannel] Failed to perform Firestore-first lookup:", fsErr);
     }
   }
 
-  console.log(`[getOrRestoreUserChannel] No existing stream record in memory/Firestore for user ${user.username}. Provisioning Livepeer stream...`);
+  // Fallback to memory cache
+  for (const c of db.channels.values()) {
+    if (c.user_uid === user.uid || (c.username && c.username.toLowerCase() === user.username.toLowerCase())) {
+      console.log(`[getOrRestoreUserChannel] Found existing in-memory channel for user ${user.username} (UID: ${user.uid}) after Firestore lookup.`);
+      return c;
+    }
+  }
+
+  // 3. ON-DEMAND LIVEPEER PROVISIONING FOR NEW USERS: Only call Livepeer's create-stream API if the user has literally zero records anywhere in Firestore/memory.
+  console.log(`[getOrRestoreUserChannel] No existing stream record in memory or Firestore for user ${user.username}. Provisioning Livepeer stream...`);
   const livepeerStream = await createLivepeerStream(user.username);
   const channelToSave: ChannelDoc = {
     channel_id: user.uid || crypto.randomUUID(),
