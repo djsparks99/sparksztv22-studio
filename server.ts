@@ -595,13 +595,11 @@ app.use(express.json({ limit: "50mb", type: ["application/json", "application/*+
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 async function startServer() {
-  const api = express.Router();
-
   restoreChannelsFromFirestore().catch(() => {});
   restoreEmotesFromFirestore().catch(() => {});
 
-  // Livepeer Webhook Handler for Automatic Live Status
-  api.post("/livepeer/webhook", async (req, res) => {
+  // Direct Livepeer Webhook Handler on app to guarantee 200 OK responses
+  app.post("/api/livepeer/webhook", async (req, res) => {
     try {
       const event = req.body;
       console.log("Livepeer Webhook Event Received:", event?.event);
@@ -644,6 +642,36 @@ async function startServer() {
       return res.status(500).json({ error: "Webhook handler failed" });
     }
   });
+
+  // Direct un-routed dashboard endpoints to completely eliminate 404s
+  app.get("/api/channels/mine", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user as UserDoc;
+      const myChannel = await getOrRestoreUserChannel(user);
+      return res.json(channelPublic(myChannel, { include_stream_key: true }));
+    } catch (err: any) {
+      return res.status(500).json({ error: "Failed to fetch channel" });
+    }
+  });
+
+  app.patch("/api/channels/mine", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user as UserDoc;
+      const { stream_title, category } = req.body || {};
+      const myChannel = await getOrRestoreUserChannel(user);
+
+      if (stream_title !== undefined) myChannel.stream_title = String(stream_title);
+      if (category !== undefined) myChannel.category = String(category);
+      myChannel.last_updated = new Date().toISOString();
+
+      db.channels.set(myChannel.channel_id, myChannel);
+      return res.json(channelPublic(myChannel, { include_stream_key: true }));
+    } catch (err: any) {
+      return res.status(500).json({ error: "Failed to update channel" });
+    }
+  });
+
+  const api = express.Router();
 
   // Get channel by username
   api.get("/channels/:username", async (req, res) => {
@@ -690,41 +718,6 @@ async function startServer() {
 
     res.json(channelPublic(found));
   });
-
-  // Get my channel
-  const getMyChannelHandler = async (req: Request, res: Response) => {
-    try {
-      const user = (req as any).user as UserDoc;
-      const myChannel = await getOrRestoreUserChannel(user);
-      return res.json(channelPublic(myChannel, { include_stream_key: true }));
-    } catch (err: any) {
-      return res.status(500).json({ error: "Failed to fetch channel" });
-    }
-  };
-
-  api.get("/channels/mine", requireAuth, getMyChannelHandler);
-  api.get("/mine", requireAuth, getMyChannelHandler);
-
-  // Update my channel
-  const updateMyChannelHandler = async (req: Request, res: Response) => {
-    try {
-      const user = (req as any).user as UserDoc;
-      const { stream_title, category } = req.body || {};
-      const myChannel = await getOrRestoreUserChannel(user);
-
-      if (stream_title !== undefined) myChannel.stream_title = String(stream_title);
-      if (category !== undefined) myChannel.category = String(category);
-      myChannel.last_updated = new Date().toISOString();
-
-      db.channels.set(myChannel.channel_id, myChannel);
-      return res.json(channelPublic(myChannel, { include_stream_key: true }));
-    } catch (err: any) {
-      return res.status(500).json({ error: "Failed to update channel" });
-    }
-  };
-
-  api.patch("/channels/mine", requireAuth, updateMyChannelHandler);
-  api.patch("/mine", requireAuth, updateMyChannelHandler);
 
   app.use("/api", api);
 
