@@ -616,8 +616,8 @@ async function startServer() {
     res.json(channelPublic(found));
   });
 
-  // Get my channel
-  api.get("/channels/mine", requireAuth, async (req, res) => {
+  // Get my channel (handles both /channels/mine and /mine)
+  const getMyChannelHandler = async (req: Request, res: Response) => {
     try {
       const user = (req as any).user as UserDoc;
       const myChannel = await getOrRestoreUserChannel(user);
@@ -625,10 +625,13 @@ async function startServer() {
     } catch (err: any) {
       return res.status(500).json({ error: "Failed to fetch channel" });
     }
-  });
+  };
 
-  // Update my channel
-  api.patch("/channels/mine", requireAuth, async (req, res) => {
+  api.get("/channels/mine", requireAuth, getMyChannelHandler);
+  api.get("/mine", requireAuth, getMyChannelHandler);
+
+  // Update my channel (handles both /channels/mine and /mine)
+  const updateMyChannelHandler = async (req: Request, res: Response) => {
     try {
       const user = (req as any).user as UserDoc;
       const { stream_title, category } = req.body || {};
@@ -643,10 +646,12 @@ async function startServer() {
     } catch (err: any) {
       return res.status(500).json({ error: "Failed to update channel" });
     }
-  });
+  };
+
+  api.patch("/channels/mine", requireAuth, updateMyChannelHandler);
+  api.patch("/mine", requireAuth, updateMyChannelHandler);
 
   app.use("/api", api);
- 
 
   const distPath = path.join(process.cwd(), "dist");
   app.use(express.static(distPath));
