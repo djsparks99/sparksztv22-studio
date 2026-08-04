@@ -151,207 +151,7 @@ async function syncChannelToFirestore(c: ChannelDoc) {
       }
 
       await batch.commit();
-      console.log(`[syncChannelToFirestore Admin SDK] Successfully persisted channel "${c.username}" (stream_key="${c.stream_key}") to Firestore.`);
-    } catch (adminErr) {
-      console.error("[syncChannelToFirestore Admin SDK Error]:", adminErr);
-    }
-  }
-
-  if (firebaseConfig.projectId && firebaseConfig.apiKey) {
-    try {
-      const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
-      const channelIdUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents/channels/${c.channel_id}?key=${firebaseConfig.apiKey}`;
-      const channelNameUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents/channels/${c.username.toLowerCase()}?key=${firebaseConfig.apiKey}`;
-      const userUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents/users/${c.user_uid}?key=${firebaseConfig.apiKey}`;
-
-      const fields = {
-        channel_id: { stringValue: c.channel_id },
-        user_uid: { stringValue: c.user_uid },
-        username: { stringValue: c.username },
-        display_name: { stringValue: c.display_name },
-        photo_url: { stringValue: c.photo_url || "" },
-        thumbnail_url: { stringValue: c.thumbnail_url || "" },
-        livepeer_stream_id: { stringValue: c.livepeer_stream_id || "" },
-        stream_key: { stringValue: c.stream_key || "" },
-        playback_id: { stringValue: c.playback_id || "" },
-        stream_title: { stringValue: c.stream_title || "" },
-        category: { stringValue: c.category || "music" },
-        is_live: { booleanValue: Boolean(c.is_live) },
-        viewer_count: { integerValue: c.viewer_count || 0 },
-        rtmp_url: { stringValue: "rtmp://rtmp.livepeer.com/live" },
-        playback_url: { stringValue: c.playback_id ? `https://livepeercdn.studio/hls/${c.playback_id}/index.m3u8` : "" },
-        schedule_json: { stringValue: JSON.stringify(c.schedule || []) },
-        last_updated: { stringValue: new Date().toISOString() },
-      };
-
-      const payload = JSON.stringify({ fields });
-
-      await Promise.allSettled([
-        fetch(channelIdUrl, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: payload }),
-        fetch(channelNameUrl, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: payload }),
-        fetch(userUrl, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ fields: { ...fields, stream_id: { stringValue: c.livepeer_stream_id || "" } } }),
-        }),
-      ]);
-    } catch (err) {
-      // Non-blocking
-    }
-  }
-}
-
-async function syncUserToFirestore(u: UserDoc) {
-  if (!u || !u.uid) return;
-  const userData = {
-    uid: u.uid,
-    email: u.email || "",
-    username: u.username || "",
-    display_name: u.display_name || "",
-    photo_url: u.photo_url || "",
-    bio: u.bio || "",
-    created_at: u.created_at || new Date().toISOString(),
-    last_updated: new Date().toISOString(),
-  };
-
-  if (admin && admin.apps && admin.apps.length) {
-    try {
-      const dbFs = admin.firestore();
-      const batch = dbFs.batch();
-      batch.set(dbFs.collection("users").doc(u.uid), userData, { merge: true });
-      if (u.username) {
-        batch.set(dbFs.collection("users").doc(u.username.toLowerCase()), userData, { merge: true });
-      }
-      await batch.commit();
-    } catch (err) {
-      console.error("[syncUserToFirestore Admin SDK Error]:", err);
-    }
-  }
-
-  if (firebaseConfig.projectId && firebaseConfig.apiKey) {
-    try {
-      const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
-      const userUidUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents/users/${u.uid}?key=${firebaseConfig.apiKey}`;
-      const fields = {
-        uid: { stringValue: u.uid },
-        email: { stringValue: u.email || "" },
-        username: { stringValue: u.username || "" },
-        display_name: { stringValue: u.display_name || "" },
-        photo_url: { stringValue: u.photo_url || "" },
-        bio: { stringValue: u.bio || "" },
-        last_updated: { stringValue: new Date().toISOString() },
-      };
-      await fetch(userUidUrl, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fields }),
-      }).catch(() => {});
-    } catch (err) {
-      // Non-blocking
-    }
-  }
-}
-
-async function syncStoryToFirestore(story: StoryDoc) {
-  if (!story || !story.id) return;
-  const storyData = {
-    id: story.id,
-    user_uid: story.user_uid,
-    username: story.username,
-    display_name: story.display_name,
-    user_photo_url: story.user_photo_url || "",
-    media_url: story.media_url || "",
-    media_type: story.media_type || "image",
-    caption: story.caption || "",
-    created_at: story.created_at,
-    expires_at: story.expires_at,
-  };
-
-  if (admin && admin.apps && admin.apps.length) {
-    try {
-      const dbFs = admin.firestore();
-      await dbFs.collection("stories").doc(story.id).set(storyData, { merge: true });
-    } catch (err) {
-      console.error("[syncStoryToFirestore Admin SDK Error]:", err);
-    }
-  }
-
-  if (firebaseConfig.projectId && firebaseConfig.apiKey) {
-    try {
-      const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
-      const url = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents/stories/${story.id}?key=${firebaseConfig.apiKey}`;
-      const fields = {
-        id: { stringValue: story.id },
-        user_uid: { stringValue: story.user_uid },
-        username: { stringValue: story.username },
-        display_name: { stringValue: story.display_name },
-        user_photo_url: { stringValue: story.user_photo_url || "" },
-        media_url: { stringValue: story.media_url || "" },
-        media_type: { stringValue: story.media_type || "image" },
-        caption: { stringValue: story.caption || "" },
-        created_at: { stringValue: story.created_at },
-        expires_at: { stringValue: story.expires_at },
-      };
-      await fetch(url, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fields }),
-      }).catch(() => {});
-    } catch (e) {
-      // Non-blocking
-    }
-  }
-}
-
-async function deleteStoryFromFirestore(storyId: string) {
-  if (!storyId) return;
-  if (admin && admin.apps && admin.apps.length) {
-    try {
-      const dbFs = admin.firestore();
-      await dbFs.collection("stories").doc(storyId).delete();
-    } catch (e) {}
-  }
-  if (firebaseConfig.projectId && firebaseConfig.apiKey) {
-    try {
-      const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
-      const url = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents/stories/${storyId}?key=${firebaseConfig.apiKey}`;
-      await fetch(url, { method: "DELETE" }).catch(() => {});
-    } catch (e) {}
-  }
-}
-
-async function restoreStoriesFromFirestore() {
-  const now = Date.now();
-  if (admin && admin.apps && admin.apps.length) {
-    try {
-      const dbFs = admin.firestore();
-      const snap = await dbFs.collection("stories").get();
-      snap.forEach((doc) => {
-        const data = doc.data() as any;
-        if (data && data.id && data.expires_at) {
-          if (new Date(data.expires_at).getTime() > now) {
-            const existingIdx = db.stories.findIndex((s) => s.id === data.id);
-            const storyObj: StoryDoc = {
-              id: data.id,
-              user_uid: data.user_uid || "",
-              username: data.username || "",
-              display_name: data.display_name || "",
-              user_photo_url: data.user_photo_url || null,
-              media_url: data.media_url || "",
-              media_type: data.media_type === "video" ? "video" : "image",
-              caption: data.caption || "",
-              created_at: data.created_at || new Date().toISOString(),
-              expires_at: data.expires_at,
-            };
-            if (existingIdx !== -1) {
-              db.stories[existingIdx] = storyObj;
-            } else {
-              db.stories.push(storyObj);
-            }
-          }
-        }
-      });
-    } catch (e) {}
+    } catch (adminErr) {}
   }
 }
 
@@ -384,50 +184,7 @@ async function restoreChannelsFromFirestore() {
           db.channels.set(channelId, channelObj);
         }
       });
-      console.log(`[restoreChannelsFromFirestore] Restored ${db.channels.size} channel(s) from Firestore.`);
-    } catch (e) {
-      console.error("Error restoring channels from Firestore:", e);
-    }
-  } else if (firebaseConfig.projectId && firebaseConfig.apiKey) {
-    try {
-      const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
-      const listUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents/channels?key=${firebaseConfig.apiKey}&pageSize=300`;
-      const response = await fetch(listUrl);
-      if (response.ok) {
-        const listData = await response.json();
-        if (Array.isArray(listData.documents)) {
-          for (const doc of listData.documents) {
-            const fields = doc.fields || {};
-            const username = fields.username?.stringValue;
-            if (username) {
-              const docName = doc.name || "";
-              const docId = docName.split("/").pop() || "";
-              const channelId = fields.channel_id?.stringValue || fields.user_uid?.stringValue || docId;
-              const channelObj: ChannelDoc = {
-                channel_id: channelId,
-                user_uid: fields.user_uid?.stringValue || channelId,
-                username: username,
-                display_name: fields.display_name?.stringValue || username,
-                photo_url: fields.photo_url?.stringValue || null,
-                thumbnail_url: fields.thumbnail_url?.stringValue || null,
-                livepeer_stream_id: fields.livepeer_stream_id?.stringValue || "",
-                stream_key: fields.stream_key?.stringValue || "",
-                playback_id: fields.playback_id?.stringValue || "",
-                stream_title: fields.stream_title?.stringValue || `${username}'s Live Stream`,
-                category: fields.category?.stringValue || "music",
-                is_live: Boolean(fields.is_live?.booleanValue ?? false),
-                viewer_count: fields.viewer_count?.integerValue ? parseInt(fields.viewer_count.integerValue, 10) : 0,
-                schedule: fields.schedule_json?.stringValue ? JSON.parse(fields.schedule_json.stringValue) : [],
-                last_updated: fields.last_updated?.stringValue || new Date().toISOString(),
-              };
-              db.channels.set(channelId, channelObj);
-            }
-          }
-        }
-      }
-    } catch (e) {
-      console.error("Error restoring channels via REST fallback:", e);
-    }
+    } catch (e) {}
   }
 }
 
@@ -452,134 +209,6 @@ async function restoreEmotesFromFirestore() {
         }
       });
     } catch (e) {}
-  }
-}
-
-async function syncEmoteToFirestore(emote: EmoteDoc) {
-  if (!emote || !emote.id) return;
-  const emoteData = {
-    id: emote.id,
-    channel_username: emote.channel_username,
-    code: emote.code,
-    name: emote.name,
-    image_url: emote.image_url,
-    created_at: emote.created_at,
-  };
-
-  if (admin && admin.apps && admin.apps.length) {
-    try {
-      await admin.firestore().collection("emotes").doc(emote.id).set(emoteData, { merge: true });
-    } catch (err) {}
-  }
-}
-
-async function deleteEmoteFromFirestore(id: string) {
-  if (admin && admin.apps && admin.apps.length) {
-    try {
-      await admin.firestore().collection("emotes").doc(id).delete();
-    } catch (err) {}
-  }
-}
-
-async function updateFirestoreChannelLiveStatus(
-  docId: string,
-  isLive: boolean,
-  timestamp: string,
-  playbackId?: string,
-  playbackUrl?: string,
-  livepeerStreamId?: string,
-  streamKey?: string
-) {
-  if (!docId) return;
-
-  const updateFields: any = {
-    is_live: isLive,
-    isLive: isLive,
-    last_updated: timestamp,
-  };
-  if (playbackId) {
-    updateFields.playback_id = playbackId;
-    updateFields.playbackId = playbackId;
-  }
-  if (playbackUrl) {
-    updateFields.playback_url = playbackUrl;
-    updateFields.playbackUrl = playbackUrl;
-  }
-  if (livepeerStreamId) {
-    updateFields.livepeer_stream_id = livepeerStreamId;
-  }
-  if (streamKey) {
-    updateFields.stream_key = streamKey;
-  }
-
-  if (admin && admin.apps && admin.apps.length) {
-    try {
-      const db = admin.firestore();
-      const docRef = db.collection("channels").doc(docId);
-      try {
-        await docRef.update(updateFields);
-      } catch {
-        await docRef.set(updateFields, { merge: true });
-      }
-      return;
-    } catch (adminErr) {}
-  }
-}
-
-async function queryAndUpdateFirestoreChannels(
-  searchKeys: string[],
-  isLive: boolean,
-  timestamp: string,
-  playbackId?: string,
-  playbackUrl?: string,
-  livepeerStreamId?: string,
-  streamKey?: string
-) {
-  const validKeys = searchKeys.filter(Boolean).map((s) => String(s).trim().toLowerCase());
-  if (validKeys.length === 0) return;
-
-  const updateFields: any = {
-    is_live: isLive,
-    isLive: isLive,
-    last_updated: timestamp,
-  };
-  if (playbackId) {
-    updateFields.playback_id = playbackId;
-    updateFields.playbackId = playbackId;
-  }
-  if (playbackUrl) {
-    updateFields.playback_url = playbackUrl;
-    updateFields.playbackUrl = playbackUrl;
-  }
-  if (livepeerStreamId) {
-    updateFields.livepeer_stream_id = livepeerStreamId;
-  }
-  if (streamKey) {
-    updateFields.stream_key = streamKey;
-  }
-
-  if (admin && admin.apps && admin.apps.length) {
-    try {
-      const db = admin.firestore();
-      const snapshot = await db.collection("channels").get();
-      for (const doc of snapshot.docs) {
-        const docId = doc.id;
-        const data = doc.data() || {};
-        const channelId = String(data.channel_id || "").toLowerCase();
-        const username = String(data.username || "").toLowerCase();
-
-        const matches = validKeys.some(
-          (k) =>
-            docId.toLowerCase() === k ||
-            (channelId && channelId === k) ||
-            (username && username === k)
-        );
-
-        if (matches) {
-          await doc.ref.set(updateFields, { merge: true });
-        }
-      }
-    } catch (adminErr) {}
   }
 }
 
@@ -731,67 +360,6 @@ interface FileDoc {
   mimeType: string;
 }
 
-function saveUploadedFile(filePath: string, buffer: Buffer, mimeType: string) {
-  db.files.set(filePath, { data: buffer, mimeType });
-  try {
-    const diskPath = path.join(process.cwd(), "uploads", filePath);
-    fs.mkdirSync(path.dirname(diskPath), { recursive: true });
-    fs.writeFileSync(diskPath, buffer);
-  } catch (err) {}
-}
-
-async function uploadToFirebaseStorage(filePath: string, buffer: Buffer, mimeType: string): Promise<string> {
-  saveUploadedFile(filePath, buffer, mimeType);
-
-  if (admin && admin.apps && admin.apps.length) {
-    try {
-      const bucketName = firebaseConfig.storageBucket || `${firebaseConfig.projectId}.firebasestorage.app`;
-      const bucket = admin.storage().bucket(bucketName);
-      const file = bucket.file(filePath);
-      const downloadToken = crypto.randomUUID();
-
-      await file.save(buffer, {
-        metadata: {
-          contentType: mimeType,
-          metadata: { firebaseStorageDownloadTokens: downloadToken },
-        },
-      });
-
-      const encodedPath = encodeURIComponent(filePath);
-      return `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodedPath}?alt=media&token=${downloadToken}`;
-    } catch (storageErr) {}
-  }
-
-  return `/api/files/${filePath}`;
-}
-
-function getUploadedFile(filePath: string): { data: Buffer; mimeType: string } | null {
-  if (db.files.has(filePath)) {
-    return db.files.get(filePath)!;
-  }
-  try {
-    const diskPath = path.join(process.cwd(), "uploads", filePath);
-    if (fs.existsSync(diskPath)) {
-      const data = fs.readFileSync(diskPath);
-      const ext = path.extname(diskPath).toLowerCase().replace(".", "");
-      const mimeTypes: Record<string, string> = {
-        png: "image/png",
-        jpg: "image/jpeg",
-        jpeg: "image/jpeg",
-        webp: "image/webp",
-        gif: "image/gif",
-        mp4: "video/mp4",
-        webm: "video/webm",
-      };
-      const mimeType = mimeTypes[ext] || "application/octet-stream";
-      const fileDoc = { data, mimeType };
-      db.files.set(filePath, fileDoc);
-      return fileDoc;
-    }
-  } catch (err) {}
-  return null;
-}
-
 class InMemStore {
   users: Map<string, UserDoc> = new Map();
   channels: Map<string, ChannelDoc> = new Map();
@@ -854,22 +422,6 @@ class InMemStore {
 
 const db = new InMemStore();
 
-function nowIso(): string {
-  return new Date().toISOString();
-}
-
-function userPublic(u: UserDoc) {
-  return {
-    uid: u.uid,
-    email: u.email,
-    username: u.username,
-    display_name: u.display_name,
-    photo_url: u.photo_url,
-    bio: u.bio || "",
-    created_at: u.created_at,
-  };
-}
-
 function channelPublic(
   c: ChannelDoc,
   opts: {
@@ -914,20 +466,6 @@ function channelPublic(
   }
 
   return out;
-}
-
-function getActiveViewerCount(channelUsername: string): number {
-  const cutoff = Date.now() - 30000;
-  db.viewerSessions = db.viewerSessions.filter((s) => s.last_seen > cutoff);
-  return db.viewerSessions.filter((s) => s.channel_username === channelUsername.toLowerCase()).length;
-}
-
-function getFollowerCount(channelUsername: string): number {
-  return db.follows.filter((f) => f.channel_username.toLowerCase() === channelUsername.toLowerCase()).length;
-}
-
-function getSubscriberCount(channelUsername: string): number {
-  return db.subscriptions.filter((s) => s.channel_username.toLowerCase() === channelUsername.toLowerCase()).length;
 }
 
 async function findUserByToken(token: string | null): Promise<UserDoc | null> {
@@ -1007,10 +545,18 @@ async function getOrRestoreUserChannel(user: UserDoc): Promise<ChannelDoc> {
   return channelToSave;
 }
 
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024 },
-});
+async function requireAuth(req: Request, res: Response, next: NextFunction) {
+  try {
+    const user = await authenticateToken(req);
+    if (!user) {
+      return res.status(401).json({ error: "Not authenticated" });
+    }
+    (req as any).user = user;
+    next();
+  } catch (e) {
+    return res.status(401).json({ error: "Authentication failed" });
+  }
+}
 
 export const app = express();
 app.use(cors({ origin: "*", methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], allowedHeaders: ["*"] }));
@@ -1020,11 +566,11 @@ app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 async function startServer() {
   const api = express.Router();
-  const wsRooms = new Map<string, Set<WebSocket>>();
 
   restoreChannelsFromFirestore().catch(() => {});
   restoreEmotesFromFirestore().catch(() => {});
 
+  // Get channel by username
   api.get("/channels/:username", async (req, res) => {
     const uname = req.params.username.toLowerCase();
 
@@ -1068,6 +614,35 @@ async function startServer() {
     }
 
     res.json(channelPublic(found));
+  });
+
+  // Get my channel
+  api.get("/channels/mine", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user as UserDoc;
+      const myChannel = await getOrRestoreUserChannel(user);
+      return res.json(channelPublic(myChannel, { include_stream_key: true }));
+    } catch (err: any) {
+      return res.status(500).json({ error: "Failed to fetch channel" });
+    }
+  });
+
+  // Update my channel
+  api.patch("/channels/mine", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user as UserDoc;
+      const { stream_title, category } = req.body || {};
+      const myChannel = await getOrRestoreUserChannel(user);
+
+      if (stream_title !== undefined) myChannel.stream_title = String(stream_title);
+      if (category !== undefined) myChannel.category = String(category);
+      myChannel.last_updated = new Date().toISOString();
+
+      db.channels.set(myChannel.channel_id, myChannel);
+      return res.json(channelPublic(myChannel, { include_stream_key: true }));
+    } catch (err: any) {
+      return res.status(500).json({ error: "Failed to update channel" });
+    }
   });
 
   app.use("/api", api);
