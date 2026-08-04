@@ -313,7 +313,7 @@ export default function Dashboard() {
           {/* Broadcast credentials */}
           <div className="mt-6 border border-[#27272a] bg-[#0a0a0a] p-6">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-              <div className="label-caps mb-0">// BROADCAST CREDENTIALS (PERMANENT LIVEPEER KEY)</div>
+              <div className="label-caps mb-0">// BROADCAST CREDENTIALS (AMAZON IVS CHANNEL)</div>
               <div className="flex items-center gap-3">
                 <button
                   data-testid="create-stream-btn"
@@ -324,7 +324,7 @@ export default function Dashboard() {
                   <RefreshCw className={`h-3 w-3 ${creatingStream ? "animate-spin" : ""}`} />
                   {creatingStream
                     ? "GENERATING..."
-                    : channel?.stream_key
+                    : channel?.stream_key || channel?.streamKey
                     ? "REGENERATE KEY"
                     : "GENERATE KEY"}
                 </button>
@@ -341,7 +341,7 @@ export default function Dashboard() {
             <div className="space-y-4">
               <CredentialRow
                 label="RTMP SERVER"
-                value={channel.rtmp_url || "rtmp://rtmp.livepeer.com/live"}
+                value={channel.rtmp_url || channel.rtmpUrl || "rtmps://global-ingest.live-video.net:443/app/"}
                 onCopy={copy}
                 testid="rtmp-url"
               />
@@ -352,16 +352,12 @@ export default function Dashboard() {
                 onCopy={copy}
                 onToggle={() => setReveal((v) => !v)}
                 reveal={reveal}
-                placeholder="Click 'NEW LIVEPEER KEY' to generate"
+                placeholder="Click 'GENERATE KEY' to generate"
                 testid="stream-key"
               />
               <CredentialRow
                 label="PLAYBACK URL"
-                value={
-                  channel.playback_id
-                    ? `https://lvpr.tv/?v=${channel.playback_id}`
-                    : ""
-                }
+                value={channel.playback_url || channel.playbackUrl || channel.playback_id || ""}
                 onCopy={copy}
                 testid="playback-url"
               />
@@ -373,8 +369,8 @@ export default function Dashboard() {
               />
             </div>
             <p className="mt-4 border-t border-[#27272a] pt-4 font-mono text-[11px] leading-relaxed text-zinc-500">
-              → Open OBS → Settings → Stream → Service: Custom → paste RTMP + Stream Key → Start
-              Streaming. Your channel flips to LIVE automatically the second Livepeer detects the
+              → Open OBS → Settings → Stream → Service: Custom → paste RTMP Server + Stream Key → Start
+              Streaming. Your channel flips to LIVE automatically the second Amazon IVS detects the
               signal — no need to touch a button.
             </p>
           </div>

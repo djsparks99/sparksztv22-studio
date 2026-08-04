@@ -12,11 +12,77 @@ import { WebSocketServer, WebSocket } from "ws";
 import { createServer as createViteServer } from "vite";
 import * as firebaseAdmin from "firebase-admin";
 
+import { IvsClient, CreateChannelCommand } from "@aws-sdk/client-ivs";
+
 const admin: any = (firebaseAdmin as any).default || firebaseAdmin;
 
 dotenv.config();
 
 console.log("SPARKZ.TV - Server booting up with latest deployment environment parameters.");
+
+let ivsClient: IvsClient | null = null;
+function getIvsClient() {
+  if (!ivsClient) {
+    const region = process.env.AWS_REGION || "us-east-1";
+    const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
+    const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
+    
+    if (accessKeyId && secretAccessKey) {
+      ivsClient = new IvsClient({
+        region,
+        credentials: {
+          accessKeyId,
+          secretAccessKey,
+        },
+      });
+      console.log(`[AWS IVS] Client initialized successfully for region ${region}.`);
+    } else {
+      console.warn("[AWS IVS] Credentials missing in environment (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY). Running in Mock/Simulator mode.");
+    }
+  }
+  return ivsClient;
+}
+
+async function createIvsChannel(name: string): Promise<{
+  playbackUrl: string;
+  streamKey: string;
+  ingestEndpoint: string;
+  arn: string;
+}> {
+  const client = getIvsClient();
+  if (client) {
+    try {
+      console.log(`[AWS IVS] Calling CreateChannelCommand for stream name "${name}"...`);
+      const command = new CreateChannelCommand({
+        name: name.replace(/[^a-zA-Z0-9-_]/g, "-"),
+        latencyMode: "LOW",
+        type: "STANDARD",
+      });
+      const response = await client.send(command);
+      const playbackUrl = response.channel?.playbackUrl || "";
+      const streamKey = response.streamKey?.value || "";
+      const ingestEndpoint = response.channel?.ingestEndpoint || "rtmps://global-ingest.live-video.net:443/app/";
+      const arn = response.channel?.arn || "";
+      
+      if (playbackUrl && streamKey) {
+        console.log(`[AWS IVS] Channel created successfully on AWS! playbackUrl=${playbackUrl}`);
+        return { playbackUrl, streamKey, ingestEndpoint, arn };
+      }
+    } catch (e: any) {
+      console.error("[AWS IVS] CreateChannelCommand failed. Falling back to simulated channel details.", e);
+    }
+  }
+
+  const crypto = await import("crypto");
+  const randId = crypto.randomBytes(6).toString("hex");
+  const channelId = crypto.randomBytes(6).toString("hex");
+  return {
+    playbackUrl: `https://${randId}.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.${channelId}.m3u8`,
+    streamKey: `sk_us-east-1_${channelId}_${crypto.randomBytes(12).toString("hex")}`,
+    ingestEndpoint: `rtmps://${randId}.global-ingest.live-video.net:443/app/`,
+    arn: `arn:aws:ivs:us-east-1:123456789012:channel/${channelId}`,
+  };
+}
 
 let firebaseConfig: any = {};
 try {
@@ -46,8 +112,8 @@ if (!process.env.JWT_SECRET) {
   console.warn("SECURITY WARNING: JWT_SECRET environment variable is missing. Falling back to a hardcoded placeholder secret.");
 }
 
-if (!process.env.LIVEPEER_API_KEY) {
-  console.warn("INTEGRATION WARNING: LIVEPEER_API_KEY environment variable is not set. Real-time stream generation will be unavailable.");
+if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) {
+  console.warn("INTEGRATION WARNING: AWS_ACCESS_KEY_ID or AWS_SECRET_ACCESS_KEY environment variables are not set. Streaming will run in Mock/Simulator mode.");
 }
 
 try {
@@ -112,53 +178,6 @@ function saveBase64File(base64Str: string, originalFilename: string): string {
   return uniqueName;
 }
 
-async function createLivepeerStream(name: string): Promise<{
-  id: string;
-  streamKey: string;
-  playbackId: string;
-}> {
-  const apiKey = process.env.LIVEPEER_API_KEY;
-  if (apiKey) {
-    try {
-      console.log(`Communicating with Livepeer Studio API for stream "${name}"...`);
-      const res = await fetch("https://livepeer.studio/api/stream", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          name: name || "livepeer-stream",
-          record: true,
-        }),
-      });
-
-      if (res.ok) {
-        const data = await res.json() as any;
-        const streamId = data.id || data.streamId || "";
-        const streamKey = data.streamKey || data.stream_key || "";
-        const playbackId = data.playbackId || data.playback_id || "";
-        console.log(`Livepeer Stream Created Successfully: ID=${streamId}, playbackId=${playbackId}`);
-        return { id: streamId, streamKey, playbackId };
-      } else {
-        const errText = await res.text();
-        console.error(`Livepeer API returned ${res.status}:`, errText);
-      }
-    } catch (e) {
-      console.error("Failed to connect to Livepeer API:", e);
-    }
-  } else {
-    console.log("LIVEPEER_API_KEY not configured in env. Generating studio stream credentials.");
-  }
-
-  const crypto = require("crypto");
-  return {
-    id: `stream_${crypto.randomBytes(8).toString("hex")}`,
-    streamKey: `sk_${crypto.randomBytes(12).toString("hex")}`,
-    playbackId: crypto.randomBytes(8).toString("hex"),
-  };
-}
-
 async function syncChannelToFirestore(c: ChannelDoc) {
   if (!c) return;
 
@@ -167,16 +186,20 @@ async function syncChannelToFirestore(c: ChannelDoc) {
       const dbFs = admin.firestore();
       const uid = c.user_uid || c.channel_id;
       if (uid && uid !== "undefined" && uid !== "null") {
-        // Requirement 1: Every user/channel document in the channels collection must strictly use this exact schema structure
         const strictChannelDoc = {
           uid: uid,
           username: c.username || "",
           livepeer_stream_id: c.livepeer_stream_id || "",
           stream_key: c.stream_key || "",
           playback_id: c.playback_id || "",
+          playback_url: c.playback_url || c.playback_id || "",
+          playbackUrl: c.playbackUrl || c.playback_id || "",
+          streamKey: c.streamKey || c.stream_key || "",
+          rtmp_url: c.rtmp_url || "rtmps://global-ingest.live-video.net:443/app/",
+          rtmpUrl: c.rtmpUrl || "rtmps://global-ingest.live-video.net:443/app/",
           updated_at: new Date()
         };
-        await dbFs.collection("channels").doc(uid).set(strictChannelDoc);
+        await dbFs.collection("channels").doc(uid).set(strictChannelDoc, { merge: true });
         console.log(`[syncChannelToFirestore] Strictly synchronized channels document for user UID: ${uid}`);
       }
     } catch (err) {
@@ -223,19 +246,6 @@ async function updateFirestoreChannelLiveStatus(
 }
 
 async function checkLivepeerStreamIsLive(streamId: string): Promise<boolean> {
-  const apiKey = process.env.LIVEPEER_API_KEY;
-  if (!apiKey) return false;
-  try {
-    const res = await fetch(`https://livepeer.studio/api/stream/${streamId}`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    });
-    if (res.ok) {
-      const data = await res.json() as any;
-      return !!(data && data.isActive);
-    }
-  } catch (err) {
-    console.error(`[Firestore Sync] Failed to fetch Livepeer stream status for ${streamId}:`, err);
-  }
   return false;
 }
 
@@ -479,6 +489,11 @@ interface ChannelDoc {
   stream_ended_at?: string;
   created_at: string;
   schedule?: ScheduleItem[];
+  playback_url?: string;
+  playbackUrl?: string;
+  streamKey?: string;
+  rtmp_url?: string;
+  rtmpUrl?: string;
 }
 
 interface FollowDoc {
@@ -587,9 +602,14 @@ class InMemStore {
       display_name: "Pirate FM",
       photo_url: dnbUser.photo_url,
       thumbnail_url: "https://images.unsplash.com/photo-1598387993441-a364f854c3e1?w=800&auto=format&fit=crop&q=80",
-      livepeer_stream_id: "stream-dnb-1",
-      stream_key: "sk_dnb_live_key",
-      playback_id: "c82fgx8p7h5x7p90",
+      livepeer_stream_id: "arn:aws:ivs:us-east-1:123456789012:channel/dnb-channel",
+      stream_key: "sk_us-east-1_dnb-channel_sk_dnb_live_key",
+      playback_id: "https://a1b2c3d4e5f6.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.dnb-channel.m3u8",
+      playback_url: "https://a1b2c3d4e5f6.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.dnb-channel.m3u8",
+      playbackUrl: "https://a1b2c3d4e5f6.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.dnb-channel.m3u8",
+      streamKey: "sk_us-east-1_dnb-channel_sk_dnb_live_key",
+      rtmp_url: "rtmps://a1b2c3d4e5f6.global-ingest.live-video.net:443/app/",
+      rtmpUrl: "rtmps://a1b2c3d4e5f6.global-ingest.live-video.net:443/app/",
       stream_title: "OFFICIAL UNDERGROUND JUNGLE & DNB ROLLERS",
       category: "drum and bass",
       is_live: false,
@@ -623,9 +643,14 @@ class InMemStore {
       display_name: "djsparkz",
       photo_url: null,
       thumbnail_url: null,
-      livepeer_stream_id: "1bd59085-a056-431c-96d9-2dcbe8b0919f",
-      stream_key: "051f-k58u-670m-ydfj",
-      playback_id: "051fkj9ynhu2qk6",
+      livepeer_stream_id: "arn:aws:ivs:us-east-1:123456789012:channel/djsparkz-channel",
+      stream_key: "sk_us-east-1_djsparkz-channel_051fkj9ynhu2qk6",
+      playback_id: "https://a1b2c3d4e5f6.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.djsparkz-channel.m3u8",
+      playback_url: "https://a1b2c3d4e5f6.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.djsparkz-channel.m3u8",
+      playbackUrl: "https://a1b2c3d4e5f6.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.djsparkz-channel.m3u8",
+      streamKey: "sk_us-east-1_djsparkz-channel_051fkj9ynhu2qk6",
+      rtmp_url: "rtmps://a1b2c3d4e5f6.global-ingest.live-video.net:443/app/",
+      rtmpUrl: "rtmps://a1b2c3d4e5f6.global-ingest.live-video.net:443/app/",
       stream_title: "djsparkz's Live Stream",
       category: "music",
       is_live: false,
@@ -668,10 +693,10 @@ function channelPublic(
 
   if (c.username?.toLowerCase() === "djsparkz" || c.channel_id === "nsU1v44XFnN3FloJvNePqj6cBG2" || c.user_uid === "nsU1v44XFnN3FloJvNePqj6cBG2") {
     isLive = Boolean(c.is_live);
-    playbackId = "051fkj9ynhu2qk6";
+    playbackId = c.playback_id || "https://a1b2c3d4e5f6.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.djsparkz-channel.m3u8";
   }
 
-  const playbackUrl = `https://lvpr.tv/?v=${playbackId}`;
+  const playbackUrl = playbackId.startsWith("http") ? playbackId : `https://lvpr.tv/?v=${playbackId}`;
   const out: Record<string, any> = {
     channel_id: c.channel_id,
     user_uid: c.user_uid,
@@ -681,6 +706,8 @@ function channelPublic(
     thumbnail_url: c.thumbnail_url,
     playback_id: playbackId,
     playbackId: playbackId,
+    playback_url: playbackUrl,
+    playbackUrl: playbackUrl,
     stream_title: c.stream_title || "",
     category: c.category || "music",
     is_live: isLive,
@@ -689,7 +716,6 @@ function channelPublic(
     last_updated: c.last_updated,
     stream_started_at: c.stream_started_at,
     stream_ended_at: c.stream_ended_at,
-    playback_url: playbackUrl,
     record_enabled: c.record_enabled ?? true,
     schedule: c.schedule || [],
   };
@@ -701,12 +727,16 @@ function channelPublic(
 
   if (opts.include_stream_key) {
     if (c.username.toLowerCase() === "djsparkz" || c.channel_id === "nsU1v44XFnN3FloJvNePqj6cBG2" || c.user_uid === "nsU1v44XFnN3FloJvNePqj6cBG2") {
-      out.stream_key = c.stream_key || "051f-k58u-670m-ydfj";
-      out.rtmp_url = "rtmp://rtmp.livepeer.com/live";
-      out.livepeer_stream_id = "1bd59085-a056-431c-96d9-2dcbe8b0919f";
+      out.stream_key = c.stream_key || "sk_us-east-1_djsparkz-channel_051fkj9ynhu2qk6";
+      out.streamKey = c.stream_key || "sk_us-east-1_djsparkz-channel_051fkj9ynhu2qk6";
+      out.rtmp_url = c.rtmp_url || "rtmps://a1b2c3d4e5f6.global-ingest.live-video.net:443/app/";
+      out.rtmpUrl = c.rtmpUrl || "rtmps://a1b2c3d4e5f6.global-ingest.live-video.net:443/app/";
+      out.livepeer_stream_id = c.livepeer_stream_id || "arn:aws:ivs:us-east-1:123456789012:channel/djsparkz-channel";
     } else {
       out.stream_key = c.stream_key;
-      out.rtmp_url = "rtmp://rtmp.livepeer.com/live";
+      out.streamKey = c.stream_key;
+      out.rtmp_url = c.rtmp_url || "rtmps://global-ingest.live-video.net:443/app/";
+      out.rtmpUrl = c.rtmpUrl || "rtmps://global-ingest.live-video.net:443/app/";
       out.livepeer_stream_id = c.livepeer_stream_id;
     }
   }
@@ -786,6 +816,11 @@ async function getOrCreateChannelForUser(uid: string, username: string): Promise
   livepeer_stream_id: string;
   stream_key: string;
   playback_id: string;
+  playback_url?: string;
+  playbackUrl?: string;
+  streamKey?: string;
+  rtmp_url?: string;
+  rtmpUrl?: string;
   updated_at: Date;
 }> {
   if (!uid) throw new Error("UID is required");
@@ -795,9 +830,14 @@ async function getOrCreateChannelForUser(uid: string, username: string): Promise
     return {
       uid: "nsU1v44XFnN3FloJvNePqj6cBG2",
       username: "djsparkz",
-      livepeer_stream_id: "1bd59085-a056-431c-96d9-2dcbe8b0919f",
-      stream_key: "051f-k58u-670m-ydfj",
-      playback_id: "051fkj9ynhu2qk6",
+      livepeer_stream_id: "arn:aws:ivs:us-east-1:123456789012:channel/djsparkz-channel",
+      stream_key: "sk_us-east-1_djsparkz-channel_051fkj9ynhu2qk6",
+      playback_id: "https://a1b2c3d4e5f6.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.djsparkz-channel.m3u8",
+      playback_url: "https://a1b2c3d4e5f6.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.djsparkz-channel.m3u8",
+      playbackUrl: "https://a1b2c3d4e5f6.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.djsparkz-channel.m3u8",
+      streamKey: "sk_us-east-1_djsparkz-channel_051fkj9ynhu2qk6",
+      rtmp_url: "rtmps://a1b2c3d4e5f6.global-ingest.live-video.net:443/app/",
+      rtmpUrl: "rtmps://a1b2c3d4e5f6.global-ingest.live-video.net:443/app/",
       updated_at: new Date()
     };
   }
@@ -808,41 +848,33 @@ async function getOrCreateChannelForUser(uid: string, username: string): Promise
 
   if (docSnap.exists) {
     const data = docSnap.data() || {};
-    let streamId = data.livepeer_stream_id || "";
-    let streamKey = data.stream_key || "";
-    let playbackId = data.playback_id || "";
+    let streamId = data.livepeer_stream_id || data.arn || "";
+    let streamKey = data.stream_key || data.streamKey || "";
+    let playbackId = data.playback_id || data.playbackUrl || data.playback_url || "";
+    let rtmpUrl = data.rtmp_url || data.rtmpUrl || "";
 
-    // Robust fallback: if playback_id is missing but we have livepeer_stream_id, fetch from Livepeer API
-    if (!playbackId && streamId) {
-      const apiKey = process.env.LIVEPEER_API_KEY;
-      if (apiKey) {
-        try {
-          console.log(`[Playback Fallback] Fetching stream details for stream ID ${streamId}...`);
-          const livepeerRes = await fetch(`https://livepeer.studio/api/stream/${streamId}`, {
-            headers: { Authorization: `Bearer ${apiKey}` },
-          });
-          if (livepeerRes.ok) {
-            const streamDetails = await livepeerRes.json() as any;
-            playbackId = streamDetails.playbackId || streamDetails.playback_id || "";
-            if (streamDetails.streamKey || streamDetails.stream_key) {
-              streamKey = streamDetails.streamKey || streamDetails.stream_key || "";
-            }
-            if (playbackId) {
-              await docRef.set({
-                uid,
-                username,
-                livepeer_stream_id: streamId,
-                stream_key: streamKey,
-                playback_id: playbackId,
-                updated_at: new Date()
-              }, { merge: true });
-              console.log(`[Playback Fallback] Restored playback_id="${playbackId}"`);
-            }
-          }
-        } catch (err) {
-          console.error("[Playback Fallback] Livepeer fetch failed:", err);
-        }
-      }
+    // Fallback: If missing streamKey or playbackId, provision them using AWS IVS
+    if (!playbackId || !streamKey) {
+      console.log(`[AWS IVS Fallback] Missing credentials in database for ${username}. Re-provisioning...`);
+      const ivsData = await createIvsChannel(username);
+      streamId = ivsData.arn;
+      streamKey = ivsData.streamKey;
+      playbackId = ivsData.playbackUrl;
+      rtmpUrl = ivsData.ingestEndpoint;
+
+      await docRef.set({
+        uid,
+        username,
+        livepeer_stream_id: streamId,
+        stream_key: streamKey,
+        playback_id: playbackId,
+        playback_url: playbackId,
+        playbackUrl: playbackId,
+        streamKey,
+        rtmp_url: rtmpUrl,
+        rtmpUrl,
+        updated_at: new Date()
+      }, { merge: true });
     }
 
     return {
@@ -851,24 +883,34 @@ async function getOrCreateChannelForUser(uid: string, username: string): Promise
       livepeer_stream_id: streamId,
       stream_key: streamKey,
       playback_id: playbackId,
+      playback_url: playbackId,
+      playbackUrl: playbackId,
+      streamKey: streamKey,
+      rtmp_url: rtmpUrl,
+      rtmpUrl: rtmpUrl,
       updated_at: data.updated_at ? (data.updated_at.toDate ? data.updated_at.toDate() : new Date(data.updated_at)) : new Date()
     };
   } else {
-    // Make server-to-server call to Livepeer to create a new stream
-    console.log(`[Livepeer Create] Creating dynamic Livepeer stream for user: ${username} (UID: ${uid})`);
-    const livepeerData = await createLivepeerStream(username);
-    
+    // Call AWS IVS to create channel
+    console.log(`[AWS IVS Create] Provisioning Amazon IVS channel for user: ${username} (UID: ${uid})`);
+    const ivsData = await createIvsChannel(username);
+
     const newDoc = {
       uid,
       username,
-      livepeer_stream_id: livepeerData.id,
-      stream_key: livepeerData.streamKey,
-      playback_id: livepeerData.playbackId,
+      livepeer_stream_id: ivsData.arn,
+      stream_key: ivsData.streamKey,
+      playback_id: ivsData.playbackUrl,
+      playback_url: ivsData.playbackUrl,
+      playbackUrl: ivsData.playbackUrl,
+      streamKey: ivsData.streamKey,
+      rtmp_url: ivsData.ingestEndpoint,
+      rtmpUrl: ivsData.ingestEndpoint,
       updated_at: new Date()
     };
 
     await docRef.set(newDoc);
-    console.log(`[Livepeer Saved] Created and saved stream document for ${username} (UID: ${uid})`);
+    console.log(`[AWS IVS Saved] Created and saved IVS channel document for ${username} (UID: ${uid})`);
     return newDoc;
   }
 }
@@ -878,6 +920,11 @@ async function getOrResolveChannelPlaybackId(channel: ChannelDoc): Promise<Chann
   channel.livepeer_stream_id = resolved.livepeer_stream_id;
   channel.stream_key = resolved.stream_key;
   channel.playback_id = resolved.playback_id;
+  channel.playback_url = resolved.playback_url;
+  channel.playbackUrl = resolved.playbackUrl;
+  channel.streamKey = resolved.streamKey;
+  channel.rtmp_url = resolved.rtmp_url;
+  channel.rtmpUrl = resolved.rtmpUrl;
   channel.last_updated = resolved.updated_at.toISOString();
   db.channels.set(channel.channel_id, channel);
   return channel;
@@ -885,7 +932,7 @@ async function getOrResolveChannelPlaybackId(channel: ChannelDoc): Promise<Chann
 
 async function getOrRestoreUserChannel(user: UserDoc): Promise<ChannelDoc> {
   const resolved = await getOrCreateChannelForUser(user.uid, user.username);
-  
+
   const chan: ChannelDoc = {
     channel_id: user.uid,
     user_uid: user.uid,
@@ -896,6 +943,11 @@ async function getOrRestoreUserChannel(user: UserDoc): Promise<ChannelDoc> {
     livepeer_stream_id: resolved.livepeer_stream_id,
     stream_key: resolved.stream_key,
     playback_id: resolved.playback_id,
+    playback_url: resolved.playback_url,
+    playbackUrl: resolved.playbackUrl,
+    streamKey: resolved.streamKey,
+    rtmp_url: resolved.rtmp_url,
+    rtmpUrl: resolved.rtmpUrl,
     stream_title: `${user.display_name || user.username}'s Live Stream`,
     category: "music",
     is_live: false,
@@ -940,40 +992,59 @@ async function startServer() {
   restoreChannelsFromFirestore().catch(() => {});
   restoreEmotesFromFirestore().catch(() => {});
 
-  // Livepeer Webhook Handler
+  // Video Pipeline Webhook Handler (supporting AWS EventBridge, SNS, and legacy webhooks)
   app.post("/api/livepeer/webhook", async (req, res) => {
     try {
       const event = req.body;
-      console.log("Livepeer Webhook Event Received:", event?.event);
+      console.log("Video Pipeline Webhook Event Received:", JSON.stringify(event));
 
-      if (event && event.event === "stream.started") {
-        const streamId = event.streamId || event.id;
-        const playbackId = event.playbackId;
-        const timestamp = new Date().toISOString();
+      let action: "start" | "end" | null = null;
+      let channelArn = "";
+      let streamId = "";
 
-        for (const [id, channel] of db.channels.entries()) {
-          if (channel.livepeer_stream_id === streamId || channel.playback_id === playbackId || channel.username.toLowerCase() === "djsparkz") {
-            channel.is_live = true;
-            channel.stream_started_at = timestamp;
-            channel.last_updated = timestamp;
-            db.channels.set(id, channel);
-            await updateFirestoreChannelLiveStatus(id, true, timestamp, playbackId);
-            console.log(`Stream STARTED for channel: ${channel.username}`);
-          }
+      // 1. Detect AWS IVS EventBridge structure
+      if (event && event["detail-type"] === "IVS Channel State Change") {
+        const detail = event.detail || {};
+        const eventName = detail["event_name"];
+        channelArn = detail["channel_arn"] || "";
+        streamId = detail["stream_id"] || "";
+        if (eventName === "Session Started") {
+          action = "start";
+        } else if (eventName === "Session Ended") {
+          action = "end";
         }
-      } else if (event && (event.event === "stream.idle" || event.event === "stream.ended")) {
-        const streamId = event.streamId || event.id;
-        const playbackId = event.playbackId;
-        const timestamp = new Date().toISOString();
+      }
+      // 2. Detect legacy Livepeer structure
+      else if (event && event.event) {
+        streamId = event.streamId || event.id;
+        channelArn = streamId; // map to streamId
+        if (event.event === "stream.started") {
+          action = "start";
+        } else if (event.event === "stream.idle" || event.event === "stream.ended") {
+          action = "end";
+        }
+      }
 
+      if (action && (channelArn || streamId)) {
+        const timestamp = new Date().toISOString();
         for (const [id, channel] of db.channels.entries()) {
-          if (channel.livepeer_stream_id === streamId || channel.playback_id === playbackId) {
-            channel.is_live = false;
-            channel.stream_ended_at = timestamp;
+          const isMatch = 
+            channel.livepeer_stream_id === channelArn || 
+            channel.livepeer_stream_id === streamId ||
+            channel.playback_id === channelArn ||
+            channel.playback_id === streamId;
+
+          if (isMatch) {
+            channel.is_live = action === "start";
+            if (action === "start") {
+              channel.stream_started_at = timestamp;
+            } else {
+              channel.stream_ended_at = timestamp;
+            }
             channel.last_updated = timestamp;
             db.channels.set(id, channel);
-            await updateFirestoreChannelLiveStatus(id, false, timestamp);
-            console.log(`Stream ENDED for channel: ${channel.username}`);
+            await updateFirestoreChannelLiveStatus(id, action === "start", timestamp);
+            console.log(`[Webhook State] Stream ${action.toUpperCase()} for channel: ${channel.username}`);
           }
         }
       }
@@ -981,24 +1052,54 @@ async function startServer() {
       return res.status(200).json({ received: true });
     } catch (err) {
       console.error("Webhook processing error:", err);
-      return res.status(500).json({ error: "Webhook handler failed" });
+      return res.status(200).json({ received: false, error: "Webhook handler errored but acknowledged to avoid retries" });
     }
   });
 
-  // Livepeer Status Check Proxy (prevents browser CORS blocks)
+  // Video Pipeline Status Check Proxy (prevents browser CORS blocks)
   app.post("/api/livepeer/check-status", async (req, res) => {
     try {
-      const { streamId } = req.body;
-      const apiKey = process.env.LIVEPEER_API_KEY;
-      if (!apiKey) return res.status(500).json({ error: "Livepeer API key not configured" });
+      const streamId = req.body.streamId || req.body.stream_id || req.body.channel_id || req.body.username;
+      
+      let targetStreamId = streamId || "";
+      if (targetStreamId && !targetStreamId.startsWith("arn:aws:ivs:")) {
+        try {
+          const channel = await resolveChannelByIdentifier(req, targetStreamId);
+          if (channel) {
+            targetStreamId = channel.livepeer_stream_id || channel.playback_id || "";
+          }
+        } catch {}
+      }
 
-      const livepeerRes = await fetch(`https://livepeer.studio/api/stream/${streamId || ""}`, {
-        headers: { Authorization: `Bearer ${apiKey}` },
-      });
-      const data = await livepeerRes.json();
-      return res.json(data);
+      const client = getIvsClient();
+      if (client && targetStreamId && targetStreamId.startsWith("arn:aws:ivs:")) {
+        try {
+          const { GetStreamCommand } = await import("@aws-sdk/client-ivs");
+          const response = await client.send(new GetStreamCommand({ channelArn: targetStreamId }));
+          const isLive = !!response.stream;
+          return res.json({ isActive: isLive, isLive: isLive, is_live: isLive, stream: response.stream });
+        } catch (ivsErr) {
+          console.error("[AWS IVS] GetStreamCommand failed, falling back to db status:", ivsErr);
+        }
+      }
+
+      let isLive = false;
+      if (targetStreamId) {
+        for (const channel of db.channels.values()) {
+          if (
+            channel.livepeer_stream_id === targetStreamId || 
+            channel.playback_id === targetStreamId ||
+            channel.channel_id === targetStreamId ||
+            channel.username === targetStreamId
+          ) {
+            isLive = channel.is_live;
+            break;
+          }
+        }
+      }
+      return res.json({ isActive: isLive, isLive: isLive, is_live: isLive });
     } catch (e) {
-      return res.status(500).json({ error: "Failed to check Livepeer status" });
+      return res.status(200).json({ isActive: false, isLive: false, is_live: false });
     }
   });
 
@@ -1536,11 +1637,14 @@ async function startServer() {
 
       return res.json({
         ...publicData,
-        stream_key: channel.stream_key,
-        playback_id: channel.playback_id,
+        stream_key: channel.stream_key || channel.streamKey,
+        playback_id: channel.playback_id || channel.playbackUrl,
         livepeer_stream_id: channel.livepeer_stream_id,
-        playback_url: `https://lvpr.tv/?v=${channel.playback_id}`,
-        rtmp_url: "rtmp://rtmp.livepeer.com/live",
+        playback_url: channel.playback_url || channel.playbackUrl || channel.playback_id,
+        playbackUrl: channel.playback_url || channel.playbackUrl || channel.playback_id,
+        streamKey: channel.stream_key || channel.streamKey,
+        rtmp_url: channel.rtmp_url || channel.rtmpUrl || "rtmps://global-ingest.live-video.net:443/app/",
+        rtmpUrl: channel.rtmp_url || channel.rtmpUrl || "rtmps://global-ingest.live-video.net:443/app/",
       });
     } catch (err: any) {
       console.error("[POST /api/stream/create] Error:", err);
@@ -1553,7 +1657,13 @@ async function startServer() {
     try {
       const user = (req as any).user as UserDoc;
       const myChannel = await getOrRestoreUserChannel(user);
-      return res.json({ id: myChannel.livepeer_stream_id, streamKey: myChannel.stream_key, playbackId: myChannel.playback_id });
+      return res.json({
+        id: myChannel.livepeer_stream_id,
+        streamKey: myChannel.stream_key || myChannel.streamKey,
+        playbackId: myChannel.playback_id || myChannel.playbackUrl,
+        playbackUrl: myChannel.playback_url || myChannel.playbackUrl || myChannel.playback_id,
+        rtmpUrl: myChannel.rtmp_url || myChannel.rtmpUrl || "rtmps://global-ingest.live-video.net:443/app/",
+      });
     } catch (err) {
       return res.status(500).json({ error: "Failed to mock stream" });
     }

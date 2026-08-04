@@ -96,8 +96,8 @@ export default function Directory() {
 
           // Force correct values for djsparkz
           if (data.username?.toLowerCase() === "djsparkz" || docId === "nsU1v44XFnN3FloJvNePqj6cBG2" || data.user_uid === "nsU1v44XFnN3FloJvNePqj6cBG2") {
-            playbackId = "051fkj9ynhu2qk6";
-            livepeerStreamId = "1bd59085-a056-431c-96d9-2dcbe8b0919f";
+            playbackId = data.playback_url || data.playbackUrl || data.playback_id || "https://a1b2c3d4e5f6.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.djsparkz-channel.m3u8";
+            livepeerStreamId = data.livepeer_stream_id || "arn:aws:ivs:us-east-1:123456789012:channel/djsparkz-channel";
           }
 
           return {

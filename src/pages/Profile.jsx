@@ -40,9 +40,9 @@ export default function Profile() {
     try {
       const { data } = await api.post("/stream/create");
       setChannel(data.channel || data);
-      toast.success("Livepeer stream key generated & synced to Firestore!");
+      toast.success("AWS IVS stream credentials generated & synced to Firestore!");
     } catch {
-      toast.error("Failed to generate Livepeer stream key.");
+      toast.error("Failed to generate AWS IVS stream credentials.");
     } finally {
       setLoadingStream(false);
     }
@@ -246,7 +246,7 @@ export default function Profile() {
           {/* Stream & Broadcast credentials */}
           <div className="mt-6 border border-[#27272a] bg-[#0a0a0a] p-6" data-testid="profile-stream-settings">
             <div className="mb-4 flex items-center justify-between">
-              <div className="label-caps">// BROADCAST & STREAM KEY (LIVEPEER)</div>
+              <div className="label-caps">// BROADCAST & STREAM KEY (AMAZON IVS)</div>
               <button
                 onClick={generateNewStreamKey}
                 disabled={loadingStream}
@@ -264,11 +264,11 @@ export default function Profile() {
                   <div className="mb-1 label-caps">RTMP SERVER</div>
                   <div className="flex items-center gap-2">
                     <code className="flex-1 overflow-x-auto whitespace-nowrap border border-[#27272a] bg-black px-3 py-2 font-mono text-[11px] text-zinc-200">
-                      {channel.rtmp_url || "rtmp://rtmp.livepeer.com/live"}
+                      {channel.rtmp_url || channel.rtmpUrl || "rtmps://global-ingest.live-video.net:443/app/"}
                     </code>
                     <button
                       onClick={() => {
-                        navigator.clipboard.writeText(channel.rtmp_url || "rtmp://rtmp.livepeer.com/live");
+                        navigator.clipboard.writeText(channel.rtmp_url || channel.rtmpUrl || "rtmps://global-ingest.live-video.net:443/app/");
                         toast.success("RTMP Server copied!");
                       }}
                       className="btn-ghost"
@@ -290,11 +290,11 @@ export default function Profile() {
                   </div>
                   <div className="flex items-center gap-2">
                     <code className="flex-1 overflow-x-auto whitespace-nowrap border border-[#27272a] bg-black px-3 py-2 font-mono text-[11px] text-zinc-200">
-                      {revealKey ? channel.stream_key : "•".repeat(Math.min(channel.stream_key?.length || 16, 24))}
+                      {revealKey ? (channel.stream_key || channel.streamKey) : "•".repeat(Math.min((channel.stream_key || channel.streamKey || "").length || 16, 24))}
                     </code>
                     <button
                       onClick={() => {
-                        navigator.clipboard.writeText(channel.stream_key || "");
+                        navigator.clipboard.writeText(channel.stream_key || channel.streamKey || "");
                         toast.success("Stream Key copied!");
                       }}
                       className="btn-ghost"
@@ -305,15 +305,15 @@ export default function Profile() {
                 </div>
 
                 <div>
-                  <div className="mb-1 label-caps">PLAYBACK ID</div>
+                  <div className="mb-1 label-caps">PLAYBACK URL</div>
                   <div className="flex items-center gap-2">
                     <code className="flex-1 overflow-x-auto whitespace-nowrap border border-[#27272a] bg-black px-3 py-2 font-mono text-[11px] text-zinc-300">
-                      {channel.playback_id || "None"}
+                      {channel.playback_url || channel.playbackUrl || channel.playback_id || "None"}
                     </code>
                     <button
                       onClick={() => {
-                        navigator.clipboard.writeText(channel.playback_id || "");
-                        toast.success("Playback ID copied!");
+                        navigator.clipboard.writeText(channel.playback_url || channel.playbackUrl || channel.playback_id || "");
+                        toast.success("Playback URL copied!");
                       }}
                       className="btn-ghost"
                     >

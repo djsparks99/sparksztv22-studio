@@ -23,7 +23,7 @@ export default function HlsPlayer({
 
   const offline = !playbackId || !isLive;
   const hlsUrl = playbackId
-    ? `https://livepeercdn.studio/hls/${playbackId}/index.m3u8`
+    ? (playbackId.startsWith("http") ? playbackId : `https://livepeercdn.studio/hls/${playbackId}/index.m3u8`)
     : "";
 
   useEffect(() => {

@@ -115,7 +115,7 @@ export default function Footer() {
             © {new Date().getFullYear()} SPARKZ.TV — BROADCASTING FROM SOMEWHERE
           </div>
           <div className="flex gap-4 font-mono text-[10px] uppercase tracking-[0.25em] text-zinc-600">
-            <span>PWR: LIVEPEER HLS</span>
+            <span>PWR: AWS IVS</span>
             <span>BUILT LOUD</span>
           </div>
         </div>
@@ -158,7 +158,7 @@ export default function Footer() {
                 3. LIVE BROADCASTING & MEDIA
               </h4>
               <p>
-                Live video feeds routed through Livepeer/HLS servers are ingested in real-time. Broadcasters retain full ownership of their original performances, sound recordings, and live audiovisual content.
+                Live video feeds routed through Amazon IVS servers are ingested in real-time. Broadcasters retain full ownership of their original performances, sound recordings, and live audiovisual content.
               </p>
             </section>
 
@@ -313,7 +313,7 @@ export default function Footer() {
                 <div className="border border-zinc-800 bg-[#0a0a0a] p-3">
                   <div className="font-bold text-white mb-1">// STREAM LATENCY & QUALITY</div>
                   <div className="text-zinc-400 font-sans text-xs">
-                    Our Livepeer engine transcodes high-bitrate video to adaptive HLS streams for seamless playback across desktop & mobile.
+                    Our AWS IVS engine transcodes high-bitrate video to adaptive streams for seamless playback across desktop & mobile.
                   </div>
                 </div>
               </div>

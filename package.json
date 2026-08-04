@@ -10,6 +10,7 @@
     "lint": "vite build"
   },
   "dependencies": {
+    "@aws-sdk/client-ivs": "^3.1103.0",
     "@hookform/resolvers": "^3.9.0",
     "@phosphor-icons/react": "^2.1.10",
     "@radix-ui/react-accordion": "^1.2.0",
