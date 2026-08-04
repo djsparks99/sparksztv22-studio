@@ -155,6 +155,36 @@ async function syncChannelToFirestore(c: ChannelDoc) {
   }
 }
 
+async function updateFirestoreChannelLiveStatus(
+  docId: string,
+  isLive: boolean,
+  timestamp: string,
+  playbackId?: string
+) {
+  if (!docId) return;
+  const updateFields: any = {
+    is_live: isLive,
+    isLive: isLive,
+    last_updated: timestamp,
+  };
+  if (playbackId) {
+    updateFields.playback_id = playbackId;
+    updateFields.playbackId = playbackId;
+  }
+
+  if (admin && admin.apps && admin.apps.length) {
+    try {
+      const db = admin.firestore();
+      const docRef = db.collection("channels").doc(docId);
+      try {
+        await docRef.update(updateFields);
+      } catch {
+        await docRef.set(updateFields, { merge: true });
+      }
+    } catch (adminErr) {}
+  }
+}
+
 async function restoreChannelsFromFirestore() {
   if (admin && admin.apps && admin.apps.length) {
     try {
@@ -570,6 +600,51 @@ async function startServer() {
   restoreChannelsFromFirestore().catch(() => {});
   restoreEmotesFromFirestore().catch(() => {});
 
+  // Livepeer Webhook Handler for Automatic Live Status
+  api.post("/livepeer/webhook", async (req, res) => {
+    try {
+      const event = req.body;
+      console.log("Livepeer Webhook Event Received:", event?.event);
+
+      if (event && event.event === "stream.started") {
+        const streamId = event.streamId || event.id;
+        const playbackId = event.playbackId;
+        const timestamp = new Date().toISOString();
+
+        for (const [id, channel] of db.channels.entries()) {
+          if (channel.livepeer_stream_id === streamId || channel.playback_id === playbackId || channel.username.toLowerCase() === "djsparkz") {
+            channel.is_live = true;
+            channel.stream_started_at = timestamp;
+            channel.last_updated = timestamp;
+            db.channels.set(id, channel);
+            await updateFirestoreChannelLiveStatus(id, true, timestamp, playbackId);
+            console.log(`Stream STARTED for channel: ${channel.username}`);
+          }
+        }
+      } else if (event && (event.event === "stream.idle" || event.event === "stream.ended")) {
+        const streamId = event.streamId || event.id;
+        const playbackId = event.playbackId;
+        const timestamp = new Date().toISOString();
+
+        for (const [id, channel] of db.channels.entries()) {
+          if (channel.livepeer_stream_id === streamId || channel.playback_id === playbackId) {
+            channel.is_live = false;
+            channel.stream_ended_at = timestamp;
+            channel.last_updated = timestamp;
+            db.channels.set(id, channel);
+            await updateFirestoreChannelLiveStatus(id, false, timestamp);
+            console.log(`Stream ENDED for channel: ${channel.username}`);
+          }
+        }
+      }
+
+      return res.status(200).json({ received: true });
+    } catch (err) {
+      console.error("Webhook processing error:", err);
+      return res.status(500).json({ error: "Webhook handler failed" });
+    }
+  });
+
   // Get channel by username
   api.get("/channels/:username", async (req, res) => {
     const uname = req.params.username.toLowerCase();
@@ -616,7 +691,7 @@ async function startServer() {
     res.json(channelPublic(found));
   });
 
-  // Get my channel (handles both /channels/mine and /mine)
+  // Get my channel
   const getMyChannelHandler = async (req: Request, res: Response) => {
     try {
       const user = (req as any).user as UserDoc;
@@ -630,7 +705,7 @@ async function startServer() {
   api.get("/channels/mine", requireAuth, getMyChannelHandler);
   api.get("/mine", requireAuth, getMyChannelHandler);
 
-  // Update my channel (handles both /channels/mine and /mine)
+  // Update my channel
   const updateMyChannelHandler = async (req: Request, res: Response) => {
     try {
       const user = (req as any).user as UserDoc;
