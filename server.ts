@@ -8,9 +8,6 @@ import dotenv from "dotenv";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import multer from "multer";
-import admin from "firebase-admin";
-import { getAuth } from "firebase-admin/auth";
-import { getFirestore } from "firebase-admin/firestore";
 import { WebSocketServer, WebSocket as WSWebSocket } from "ws";
 
 import { 
@@ -26,13 +23,7 @@ dotenv.config();
 
 console.log("SPARKZ.TV - Server booting up with universal avatar sync.");
 
-try {
-  if (!admin.apps || admin.apps.length === 0) {
-    admin.initializeApp({
-      projectId: process.env.FIREBASE_PROJECT_ID || "ai-studio-applet-webapp-400d5",
-    });
-  }
-} catch (e: any) {}
+
 
 let ivsClient: IvsClient | null = null;
 function getIvsClient() {
@@ -454,54 +445,31 @@ async function startServer() {
 
     const token = authHeader.split(" ")[1];
     try {
-      const decodedToken = await getAuth().verifyIdToken(token);
-      const uid = decodedToken.uid;
+      const decodedToken = jwt.decode(token) as any;
+      if (!decodedToken) {
+        throw new Error("Invalid JWT token format");
+      }
+      const uid = decodedToken.uid || decodedToken.sub;
+      if (!uid) {
+        throw new Error("No UID found in JWT");
+      }
 
       let user = db.users.get(uid);
       if (!user) {
-        // Try to load from Firestore
-        try {
-          const docSnap = await getFirestore().collection("users").doc(uid).get();
-          if (docSnap.exists) {
-            const data = docSnap.data();
-            if (data) {
-              const email = data.email || decodedToken.email || "";
-              const isDjSparkz = email === "markysparks99@gmail.com";
-              user = {
-                uid,
-                email,
-                username: isDjSparkz ? "djsparkz" : (data.username || email.split("@")[0] || "user"),
-                display_name: data.display_name && data.display_name !== "SPARKS 108 FM" ? data.display_name : (isDjSparkz ? "djsparkz" : (data.username || decodedToken.name || "User")),
-                photo_url: data.photo_url || decodedToken.picture || null,
-                bio: data.bio || (isDjSparkz ? "Broadcasting live and loud on SPARKZ.TV" : ""),
-                password_hash: "",
-                created_at: data.created_at || new Date().toISOString(),
-                watts: typeof data.watts === "number" ? data.watts : (isDjSparkz ? 2500 : 100),
-              };
-              db.users.set(uid, user);
-            }
-          }
-        } catch (fErr) {
-          console.error("[Auth Middleware Firestore Error]:", fErr);
-        }
-
-        // Fallback if not in Firestore
-        if (!user) {
-          const email = decodedToken.email || "";
-          const isDjSparkz = email === "markysparks99@gmail.com";
-          user = {
-            uid,
-            email,
-            username: isDjSparkz ? "djsparkz" : (email.split("@")[0] || "user"),
-            display_name: isDjSparkz ? "djsparkz" : (decodedToken.name || email.split("@")[0] || "User"),
-            photo_url: decodedToken.picture || null,
-            bio: isDjSparkz ? "Broadcasting live and loud on SPARKZ.TV" : "",
-            password_hash: "",
-            created_at: new Date().toISOString(),
-            watts: isDjSparkz ? 2500 : 100,
-          };
-          db.users.set(uid, user);
-        }
+        const email = decodedToken.email || "";
+        const isDjSparkz = email === "markysparks99@gmail.com";
+        user = {
+          uid,
+          email,
+          username: isDjSparkz ? "djsparkz" : (email.split("@")[0] || "user"),
+          display_name: isDjSparkz ? "djsparkz" : (decodedToken.name || email.split("@")[0] || "User"),
+          photo_url: decodedToken.picture || null,
+          bio: isDjSparkz ? "Broadcasting live and loud on SPARKZ.TV" : "",
+          password_hash: "",
+          created_at: new Date().toISOString(),
+          watts: isDjSparkz ? 2500 : 100,
+        };
+        db.users.set(uid, user);
       }
 
       // Final sanitization check for djsparkz
@@ -545,13 +513,7 @@ async function startServer() {
 
       if (req.body?.display_name !== undefined) {
         user.display_name = req.body.display_name;
-        try {
-          await getFirestore().collection("users").doc(user.uid).set({
-            display_name: req.body.display_name
-          }, { merge: true });
-        } catch (dbErr) {
-          console.error("Failed to persist display_name change to Firestore:", dbErr);
-        }
+        db.users.set(user.uid, user);
 
         if (user.uid === "nsU1v44XFnN3FloJvNePqj6cBG2") {
           const channel = await getMasterChannel();
@@ -560,13 +522,7 @@ async function startServer() {
       }
       if (req.body?.bio !== undefined) {
         user.bio = req.body.bio;
-        try {
-          await getFirestore().collection("users").doc(user.uid).set({
-            bio: req.body.bio
-          }, { merge: true });
-        } catch (dbErr) {
-          console.error("Failed to persist bio change to Firestore:", dbErr);
-        }
+        db.users.set(user.uid, user);
       }
 
       return res.json({
@@ -657,13 +613,7 @@ async function startServer() {
       }
 
       user.photo_url = photoUrl;
-      try {
-        await getFirestore().collection("users").doc(user.uid).set({
-          photo_url: photoUrl
-        }, { merge: true });
-      } catch (dbErr) {
-        console.error("Failed to persist photo_url change to Firestore:", dbErr);
-      }
+      db.users.set(user.uid, user);
 
       if (user.uid === "nsU1v44XFnN3FloJvNePqj6cBG2") {
         const channel = await getMasterChannel();
@@ -866,37 +816,16 @@ async function startServer() {
 
       if (token && token !== "guest") {
         try {
-          const decodedToken = await getAuth().verifyIdToken(token);
-          uid = decodedToken.uid;
+          const decodedToken = jwt.decode(token) as any;
+          if (!decodedToken) {
+            throw new Error("Invalid JWT token format");
+          }
+          uid = decodedToken.uid || decodedToken.sub;
+          if (!uid) {
+            throw new Error("No UID found in JWT");
+          }
           
           let localUser = db.users.get(uid);
-          if (!localUser) {
-            try {
-              const docSnap = await getFirestore().collection("users").doc(uid).get();
-              if (docSnap.exists) {
-                const data = docSnap.data();
-                if (data) {
-                  const email = data.email || decodedToken.email || "";
-                  const isDjSparkz = email === "markysparks99@gmail.com";
-                  localUser = {
-                    uid,
-                    email,
-                    username: isDjSparkz ? "djsparkz" : (data.username || email.split("@")[0] || "user"),
-                    display_name: data.display_name && data.display_name !== "SPARKS 108 FM" ? data.display_name : (isDjSparkz ? "djsparkz" : (data.username || decodedToken.name || "User")),
-                    photo_url: data.photo_url || decodedToken.picture || null,
-                    bio: data.bio || "",
-                    password_hash: "",
-                    created_at: data.created_at || new Date().toISOString(),
-                    watts: typeof data.watts === "number" ? data.watts : (isDjSparkz ? 2500 : 100),
-                  };
-                  db.users.set(uid, localUser);
-                }
-              }
-            } catch (fErr) {
-              console.error("[WS Firestore Error]:", fErr);
-            }
-          }
-
           if (!localUser) {
             const nameFromToken = decodedToken.name || decodedToken.email || "User";
             const emailFromToken = decodedToken.email || "";
@@ -907,7 +836,7 @@ async function startServer() {
               username: isDjSparkz ? "djsparkz" : (emailFromToken.split("@")[0] || nameFromToken),
               display_name: isDjSparkz ? "djsparkz" : nameFromToken,
               photo_url: decodedToken.picture || null,
-              bio: "",
+              bio: isDjSparkz ? "Broadcasting live and loud on SPARKZ.TV" : "",
               password_hash: "",
               created_at: new Date().toISOString(),
               watts: isDjSparkz ? 2500 : 100,
