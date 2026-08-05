@@ -64,6 +64,36 @@ export function AuthProvider({ children }) {
       return;
     }
 
+    if (fbUser.email === "markysparks99@gmail.com") {
+      let photo_url = fbUser.photoURL || null;
+      let bio = "Broadcasting live and loud on SPARKZ.TV";
+      let display_name = "djsparkz";
+      try {
+        const userDoc = await fetchUserDoc(fbUser.uid);
+        if (userDoc) {
+          if (userDoc.photo_url) photo_url = userDoc.photo_url;
+          if (userDoc.bio) bio = userDoc.bio;
+          if (userDoc.display_name && userDoc.display_name !== "SPARKS 108 FM") display_name = userDoc.display_name;
+        }
+      } catch (e) {}
+
+      const profile = {
+        uid: fbUser.uid,
+        email: fbUser.email,
+        username: "djsparkz",
+        display_name: display_name,
+        photo_url: photo_url,
+        bio: bio,
+        username_locked: true,
+        created_at: new Date().toISOString(),
+      };
+      await syncExpressToken(fbUser, profile);
+      setUser(profile);
+      setNeedsUsername(false);
+      setPendingFirebaseUser(null);
+      return;
+    }
+
     try {
       const userDoc = await fetchUserDoc(fbUser.uid);
       if (userDoc && userDoc.username_locked) {

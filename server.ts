@@ -10,6 +10,7 @@ import bcrypt from "bcryptjs";
 import multer from "multer";
 import admin from "firebase-admin";
 import { getAuth } from "firebase-admin/auth";
+import { getFirestore } from "firebase-admin/firestore";
 import { WebSocketServer, WebSocket as WSWebSocket } from "ws";
 
 import { 
@@ -460,20 +461,22 @@ async function startServer() {
       if (!user) {
         // Try to load from Firestore
         try {
-          const docSnap = await admin.firestore().collection("users").doc(uid).get();
+          const docSnap = await getFirestore().collection("users").doc(uid).get();
           if (docSnap.exists) {
             const data = docSnap.data();
             if (data) {
+              const email = data.email || decodedToken.email || "";
+              const isDjSparkz = email === "markysparks99@gmail.com";
               user = {
                 uid,
-                email: data.email || decodedToken.email || "",
-                username: data.username || decodedToken.email?.split("@")[0] || "user",
-                display_name: data.display_name || data.username || decodedToken.name || "User",
+                email,
+                username: isDjSparkz ? "djsparkz" : (data.username || email.split("@")[0] || "user"),
+                display_name: data.display_name && data.display_name !== "SPARKS 108 FM" ? data.display_name : (isDjSparkz ? "djsparkz" : (data.username || decodedToken.name || "User")),
                 photo_url: data.photo_url || decodedToken.picture || null,
-                bio: data.bio || "",
+                bio: data.bio || (isDjSparkz ? "Broadcasting live and loud on SPARKZ.TV" : ""),
                 password_hash: "",
                 created_at: data.created_at || new Date().toISOString(),
-                watts: typeof data.watts === "number" ? data.watts : 100,
+                watts: typeof data.watts === "number" ? data.watts : (isDjSparkz ? 2500 : 100),
               };
               db.users.set(uid, user);
             }
@@ -484,18 +487,28 @@ async function startServer() {
 
         // Fallback if not in Firestore
         if (!user) {
+          const email = decodedToken.email || "";
+          const isDjSparkz = email === "markysparks99@gmail.com";
           user = {
             uid,
-            email: decodedToken.email || "",
-            username: decodedToken.email?.split("@")[0] || "user",
-            display_name: decodedToken.name || decodedToken.email?.split("@")[0] || "User",
+            email,
+            username: isDjSparkz ? "djsparkz" : (email.split("@")[0] || "user"),
+            display_name: isDjSparkz ? "djsparkz" : (decodedToken.name || email.split("@")[0] || "User"),
             photo_url: decodedToken.picture || null,
-            bio: "",
+            bio: isDjSparkz ? "Broadcasting live and loud on SPARKZ.TV" : "",
             password_hash: "",
             created_at: new Date().toISOString(),
-            watts: 100,
+            watts: isDjSparkz ? 2500 : 100,
           };
           db.users.set(uid, user);
+        }
+      }
+
+      // Final sanitization check for djsparkz
+      if (user && user.email === "markysparks99@gmail.com") {
+        user.username = "djsparkz";
+        if (!user.display_name || user.display_name === "SPARKS 108 FM" || user.display_name === "markysparks99") {
+          user.display_name = "djsparkz";
         }
       }
 
@@ -533,7 +546,7 @@ async function startServer() {
       if (req.body?.display_name !== undefined) {
         user.display_name = req.body.display_name;
         try {
-          await admin.firestore().collection("users").doc(user.uid).set({
+          await getFirestore().collection("users").doc(user.uid).set({
             display_name: req.body.display_name
           }, { merge: true });
         } catch (dbErr) {
@@ -548,7 +561,7 @@ async function startServer() {
       if (req.body?.bio !== undefined) {
         user.bio = req.body.bio;
         try {
-          await admin.firestore().collection("users").doc(user.uid).set({
+          await getFirestore().collection("users").doc(user.uid).set({
             bio: req.body.bio
           }, { merge: true });
         } catch (dbErr) {
@@ -645,7 +658,7 @@ async function startServer() {
 
       user.photo_url = photoUrl;
       try {
-        await admin.firestore().collection("users").doc(user.uid).set({
+        await getFirestore().collection("users").doc(user.uid).set({
           photo_url: photoUrl
         }, { merge: true });
       } catch (dbErr) {
@@ -859,20 +872,22 @@ async function startServer() {
           let localUser = db.users.get(uid);
           if (!localUser) {
             try {
-              const docSnap = await admin.firestore().collection("users").doc(uid).get();
+              const docSnap = await getFirestore().collection("users").doc(uid).get();
               if (docSnap.exists) {
                 const data = docSnap.data();
                 if (data) {
+                  const email = data.email || decodedToken.email || "";
+                  const isDjSparkz = email === "markysparks99@gmail.com";
                   localUser = {
                     uid,
-                    email: data.email || decodedToken.email || "",
-                    username: data.username || decodedToken.email?.split("@")[0] || "user",
-                    display_name: data.display_name || data.username || decodedToken.name || "User",
+                    email,
+                    username: isDjSparkz ? "djsparkz" : (data.username || email.split("@")[0] || "user"),
+                    display_name: data.display_name && data.display_name !== "SPARKS 108 FM" ? data.display_name : (isDjSparkz ? "djsparkz" : (data.username || decodedToken.name || "User")),
                     photo_url: data.photo_url || decodedToken.picture || null,
                     bio: data.bio || "",
                     password_hash: "",
                     created_at: data.created_at || new Date().toISOString(),
-                    watts: typeof data.watts === "number" ? data.watts : 100,
+                    watts: typeof data.watts === "number" ? data.watts : (isDjSparkz ? 2500 : 100),
                   };
                   db.users.set(uid, localUser);
                 }
@@ -885,18 +900,27 @@ async function startServer() {
           if (!localUser) {
             const nameFromToken = decodedToken.name || decodedToken.email || "User";
             const emailFromToken = decodedToken.email || "";
+            const isDjSparkz = emailFromToken === "markysparks99@gmail.com";
             localUser = {
               uid,
               email: emailFromToken,
-              username: emailFromToken.split("@")[0] || nameFromToken,
-              display_name: nameFromToken,
+              username: isDjSparkz ? "djsparkz" : (emailFromToken.split("@")[0] || nameFromToken),
+              display_name: isDjSparkz ? "djsparkz" : nameFromToken,
               photo_url: decodedToken.picture || null,
               bio: "",
               password_hash: "",
               created_at: new Date().toISOString(),
-              watts: 100,
+              watts: isDjSparkz ? 2500 : 100,
             };
             db.users.set(uid, localUser);
+          }
+
+          // Final sanitization check for djsparkz in WebSocket connection
+          if (localUser && localUser.email === "markysparks99@gmail.com") {
+            localUser.username = "djsparkz";
+            if (!localUser.display_name || localUser.display_name === "SPARKS 108 FM" || localUser.display_name === "markysparks99") {
+              localUser.display_name = "djsparkz";
+            }
           }
 
           username = localUser.username;
