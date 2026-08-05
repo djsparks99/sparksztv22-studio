@@ -426,6 +426,87 @@ async function startServer() {
   });
 
   const api = express.Router();
+
+  const authMiddleware = async (req: any, res: Response, next: NextFunction) => {
+    const authHeader = req.headers.authorization;
+    const fallbackUid = "nsU1v44XFnN3FloJvNePqj6cBG2";
+
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      let user = db.users.get(fallbackUid);
+      if (!user) {
+        user = {
+          uid: fallbackUid,
+          email: "djsparkz@sparkz.tv",
+          username: "djsparkz",
+          display_name: "djsparkz",
+          photo_url: null,
+          bio: "Broadcasting live and loud on SPARKZ.TV",
+          password_hash: "",
+          created_at: new Date().toISOString(),
+          watts: 2500,
+        };
+        db.users.set(fallbackUid, user);
+      }
+      req.user = user;
+      return next();
+    }
+
+    const token = authHeader.split(" ")[1];
+    try {
+      const decodedToken = await getAuth().verifyIdToken(token);
+      const uid = decodedToken.uid;
+
+      let user = db.users.get(uid);
+      if (!user) {
+        // Try to load from Firestore
+        try {
+          const docSnap = await admin.firestore().collection("users").doc(uid).get();
+          if (docSnap.exists) {
+            const data = docSnap.data();
+            if (data) {
+              user = {
+                uid,
+                email: data.email || decodedToken.email || "",
+                username: data.username || decodedToken.email?.split("@")[0] || "user",
+                display_name: data.display_name || data.username || decodedToken.name || "User",
+                photo_url: data.photo_url || decodedToken.picture || null,
+                bio: data.bio || "",
+                password_hash: "",
+                created_at: data.created_at || new Date().toISOString(),
+                watts: typeof data.watts === "number" ? data.watts : 100,
+              };
+              db.users.set(uid, user);
+            }
+          }
+        } catch (fErr) {
+          console.error("[Auth Middleware Firestore Error]:", fErr);
+        }
+
+        // Fallback if not in Firestore
+        if (!user) {
+          user = {
+            uid,
+            email: decodedToken.email || "",
+            username: decodedToken.email?.split("@")[0] || "user",
+            display_name: decodedToken.name || decodedToken.email?.split("@")[0] || "User",
+            photo_url: decodedToken.picture || null,
+            bio: "",
+            password_hash: "",
+            created_at: new Date().toISOString(),
+            watts: 100,
+          };
+          db.users.set(uid, user);
+        }
+      }
+
+      req.user = user;
+      next();
+    } catch (err) {
+      console.warn("[Auth Middleware Token Verification Failed]:", err);
+      req.user = db.users.get(fallbackUid);
+      next();
+    }
+  };
   
   api.get("/categories", (req, res) => {
     return res.json([
@@ -442,23 +523,43 @@ async function startServer() {
     ]);
   });
 
-  const handleUserUpdate = async (req: Request, res: Response) => {
+  const handleUserUpdate = async (req: any, res: Response) => {
     try {
-      const user = db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2")!;
+      const user = req.user;
+      if (!user) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
 
       if (req.body?.display_name !== undefined) {
         user.display_name = req.body.display_name;
-        const channel = await getMasterChannel();
-        channel.display_name = req.body.display_name;
+        try {
+          await admin.firestore().collection("users").doc(user.uid).set({
+            display_name: req.body.display_name
+          }, { merge: true });
+        } catch (dbErr) {
+          console.error("Failed to persist display_name change to Firestore:", dbErr);
+        }
+
+        if (user.uid === "nsU1v44XFnN3FloJvNePqj6cBG2") {
+          const channel = await getMasterChannel();
+          channel.display_name = req.body.display_name;
+        }
       }
       if (req.body?.bio !== undefined) {
         user.bio = req.body.bio;
+        try {
+          await admin.firestore().collection("users").doc(user.uid).set({
+            bio: req.body.bio
+          }, { merge: true });
+        } catch (dbErr) {
+          console.error("Failed to persist bio change to Firestore:", dbErr);
+        }
       }
 
       return res.json({
         ...user,
-        username: "djsparkz",
-        display_name: user.display_name || "djsparkz",
+        username: user.username,
+        display_name: user.display_name,
         photo_url: user.photo_url,
         photoUrl: user.photo_url,
         avatar: user.photo_url,
@@ -469,9 +570,9 @@ async function startServer() {
     }
   };
 
-  api.patch("/users/me", handleUserUpdate);
-  api.put("/users/me", handleUserUpdate);
-  api.post("/users/me", handleUserUpdate);
+  api.patch("/users/me", authMiddleware, handleUserUpdate);
+  api.put("/users/me", authMiddleware, handleUserUpdate);
+  api.post("/users/me", authMiddleware, handleUserUpdate);
 
   const handleChannelUpdate = async (req: Request, res: Response) => {
     try {
@@ -515,12 +616,12 @@ async function startServer() {
     }
   });
 
-  api.get("/users/me", async (req, res) => {
-    const user = db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2")!;
+  api.get("/users/me", authMiddleware, async (req: any, res) => {
+    const user = req.user;
     return res.json({
       ...user,
-      username: "djsparkz",
-      display_name: user.display_name || "djsparkz",
+      username: user.username,
+      display_name: user.display_name,
       photo_url: user.photo_url,
       photoUrl: user.photo_url,
       avatar: user.photo_url,
@@ -528,20 +629,33 @@ async function startServer() {
     });
   });
 
-  const handlePhotoUpload = async (req: Request, res: Response) => {
+  const handlePhotoUpload = async (req: any, res: Response) => {
     try {
-      const user = db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2")!;
+      const user = req.user;
+      if (!user) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
       let photoUrl = user.photo_url;
 
       if (req.file) {
         photoUrl = `/api/files/${req.file.filename}`;
-      } else if (req.body?.photo_url || req.body?.photoUrl || req.body?.photo || req.body?.avatar) {
-        photoUrl = req.body.photo_url || req.body.photoUrl || req.body.photo || req.body.avatar;
+      } else if (req.body?.photo_url || req.body?.photoUrl || req.body?.photo || req.body?.avatar || req.body?.image) {
+        photoUrl = req.body.photo_url || req.body.photoUrl || req.body.photo || req.body.avatar || req.body.image;
       }
 
       user.photo_url = photoUrl;
-      const channel = await getMasterChannel();
-      channel.photo_url = photoUrl;
+      try {
+        await admin.firestore().collection("users").doc(user.uid).set({
+          photo_url: photoUrl
+        }, { merge: true });
+      } catch (dbErr) {
+        console.error("Failed to persist photo_url change to Firestore:", dbErr);
+      }
+
+      if (user.uid === "nsU1v44XFnN3FloJvNePqj6cBG2") {
+        const channel = await getMasterChannel();
+        channel.photo_url = photoUrl;
+      }
 
       return res.json({
         success: true,
@@ -551,8 +665,8 @@ async function startServer() {
         avatar_url: photoUrl,
         user: {
           ...user,
-          username: "djsparkz",
-          display_name: user.display_name || "djsparkz",
+          username: user.username,
+          display_name: user.display_name,
           photo_url: photoUrl,
           photoUrl: photoUrl,
           avatar: photoUrl,
@@ -564,8 +678,8 @@ async function startServer() {
     }
   };
 
-  api.post("/users/me/photo", upload.single("photo"), handlePhotoUpload);
-  api.put("/users/me/photo", upload.single("photo"), handlePhotoUpload);
+  api.post("/users/me/photo", authMiddleware, upload.single("photo"), handlePhotoUpload);
+  api.put("/users/me/photo", authMiddleware, upload.single("photo"), handlePhotoUpload);
 
   api.post("/channels/mine/thumbnail", upload.single("thumbnail"), async (req, res) => {
     try {
@@ -743,6 +857,31 @@ async function startServer() {
           uid = decodedToken.uid;
           
           let localUser = db.users.get(uid);
+          if (!localUser) {
+            try {
+              const docSnap = await admin.firestore().collection("users").doc(uid).get();
+              if (docSnap.exists) {
+                const data = docSnap.data();
+                if (data) {
+                  localUser = {
+                    uid,
+                    email: data.email || decodedToken.email || "",
+                    username: data.username || decodedToken.email?.split("@")[0] || "user",
+                    display_name: data.display_name || data.username || decodedToken.name || "User",
+                    photo_url: data.photo_url || decodedToken.picture || null,
+                    bio: data.bio || "",
+                    password_hash: "",
+                    created_at: data.created_at || new Date().toISOString(),
+                    watts: typeof data.watts === "number" ? data.watts : 100,
+                  };
+                  db.users.set(uid, localUser);
+                }
+              }
+            } catch (fErr) {
+              console.error("[WS Firestore Error]:", fErr);
+            }
+          }
+
           if (!localUser) {
             const nameFromToken = decodedToken.name || decodedToken.email || "User";
             const emailFromToken = decodedToken.email || "";
