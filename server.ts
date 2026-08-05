@@ -621,7 +621,7 @@ async function startServer() {
       let html = fs.readFileSync(indexPath, "utf8");
 
       let title = "SPARKZ.TV // Your Stream, Your Mix, Your Rules";
-      let image = `${req.protocol}://${req.get("host")}/api/files/oie_wGXIg9faI9ss.jpg`;
+      let image = `${req.protocol}://${req.get("host")}/og-image.jpg`;
       const url = `${req.protocol}://${req.get("host")}${req.originalUrl}`;
 
       if (req.path.startsWith("/channel/")) {
