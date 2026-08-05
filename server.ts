@@ -187,18 +187,56 @@ class InMemStore {
 
 const db = new InMemStore();
 
+const DUMMY_USERNAMES = [
+  "pirate_fm", "acid_vault", "dub_station", "test", "demo", "undefined", "null", "dummy", "user", "channel"
+];
+
+function isDummyOrInvalid(channel: any) {
+  if (!channel) return true;
+  const username = (channel.username || "").toLowerCase().trim();
+  const displayName = (channel.display_name || "").toLowerCase().trim();
+  const id = (channel.id || channel.channel_id || "").toLowerCase().trim();
+
+  // If ID is null or undefined or empty
+  if (!id || id === "undefined" || id === "null") return true;
+
+  // Filter out explicit dummies or test accounts
+  if (channel.is_dummy || channel.isDummy) return true;
+  
+  if (DUMMY_USERNAMES.includes(username) || DUMMY_USERNAMES.includes(displayName) || DUMMY_USERNAMES.includes(id)) {
+    return true;
+  }
+
+  // Filter out channel IDs starting with dummy patterns
+  if (id.startsWith("chan-pirate") || id.startsWith("chan-acid") || id.startsWith("chan-dub") || id.startsWith("dummy-")) {
+    return true;
+  }
+
+  // Filter out stubs where username is too short
+  if (username.length < 2) return true;
+
+  return false;
+}
+
 function channelPublic(c: ChannelDoc, opts: { include_stream_key?: boolean } = {}) {
-  if (!c || c.channel_id === "undefined") return {};
-  const playbackId = c.playback_id || "";
-  const user = db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2");
+  if (!c || c.channel_id === "undefined" || c.username === "undefined") return {};
+  
+  const isMaster = (c.username || "").toLowerCase() === "djsparkz" || c.user_uid === "nsU1v44XFnN3FloJvNePqj6cBG2";
+  const user = db.users.get(c.user_uid || "nsU1v44XFnN3FloJvNePqj6cBG2");
   const activePhoto = c.photo_url || user?.photo_url || null;
+  
+  const channelId = isMaster ? "djsparkz" : (c.channel_id || c.username || "");
+  const username = isMaster ? "djsparkz" : (c.username || "");
+  const displayName = isMaster ? "djsparkz" : (c.display_name || username);
+  const userUid = isMaster ? "nsU1v44XFnN3FloJvNePqj6cBG2" : (c.user_uid || "");
+  const playbackId = c.playback_id || "";
 
   const out: Record<string, any> = {
-    channel_id: "djsparkz",
-    id: "djsparkz",
-    user_uid: "nsU1v44XFnN3FloJvNePqj6cBG2",
-    username: "djsparkz",
-    display_name: "djsparkz",
+    channel_id: channelId,
+    id: channelId,
+    user_uid: userUid,
+    username: username,
+    display_name: displayName,
     photo_url: activePhoto,
     photoUrl: activePhoto,
     avatar: activePhoto,
@@ -206,7 +244,7 @@ function channelPublic(c: ChannelDoc, opts: { include_stream_key?: boolean } = {
     thumbnail_url: c.thumbnail_url || null,
     playback_id: playbackId,
     playbackUrl: playbackId,
-    stream_title: "djsparkz's Live Stream",
+    stream_title: c.stream_title || `${displayName}'s Live Stream`,
     category: c.category || "music",
     is_live: Boolean(c.is_live),
     isLive: Boolean(c.is_live),
@@ -229,35 +267,21 @@ async function getMasterChannel() {
   
   try {
     const dbFirestore = admin.firestore();
-    const userSnap = await dbFirestore.collection("users").doc("nsU1v44XFnN3FloJvNePqj6cBG2").get();
-    if (userSnap.exists) {
-      const data = userSnap.data();
-      if (data) {
-        if (data.photo_url !== undefined) user.photo_url = data.photo_url;
-        if (data.display_name !== undefined) user.display_name = data.display_name;
-        if (data.bio !== undefined) user.bio = data.bio;
-      }
-    }
     
-    const channelSnap = await dbFirestore.collection("channels").doc("djsparkz").get();
-    if (channelSnap.exists) {
-      const data = channelSnap.data();
-      if (data) {
-        if (chan) {
-          if (data.photo_url !== undefined) chan.photo_url = data.photo_url;
-          if (data.thumbnail_url !== undefined) chan.thumbnail_url = data.thumbnail_url;
-          if (data.display_name !== undefined) chan.display_name = data.display_name;
-          if (data.stream_title !== undefined) chan.stream_title = data.stream_title;
-          if (data.category !== undefined) chan.category = data.category;
-          if (data.schedule !== undefined) (chan as any).schedule = data.schedule;
-          if (data.is_live !== undefined) chan.is_live = Boolean(data.is_live);
-          if (data.viewer_count !== undefined) chan.viewer_count = Number(data.viewer_count);
+    const fetchFromFirestore = async () => {
+      const userSnap = await dbFirestore.collection("users").doc("nsU1v44XFnN3FloJvNePqj6cBG2").get();
+      if (userSnap.exists) {
+        const data = userSnap.data();
+        if (data) {
+          if (data.photo_url !== undefined) user.photo_url = data.photo_url;
+          if (data.display_name !== undefined) user.display_name = data.display_name;
+          if (data.bio !== undefined) user.bio = data.bio;
         }
       }
-    } else {
-      const channelSnapUid = await dbFirestore.collection("channels").doc("nsU1v44XFnN3FloJvNePqj6cBG2").get();
-      if (channelSnapUid.exists) {
-        const data = channelSnapUid.data();
+      
+      const channelSnap = await dbFirestore.collection("channels").doc("djsparkz").get();
+      if (channelSnap.exists) {
+        const data = channelSnap.data();
         if (data) {
           if (chan) {
             if (data.photo_url !== undefined) chan.photo_url = data.photo_url;
@@ -270,8 +294,33 @@ async function getMasterChannel() {
             if (data.viewer_count !== undefined) chan.viewer_count = Number(data.viewer_count);
           }
         }
+      } else {
+        const channelSnapUid = await dbFirestore.collection("channels").doc("nsU1v44XFnN3FloJvNePqj6cBG2").get();
+        if (channelSnapUid.exists) {
+          const data = channelSnapUid.data();
+          if (data) {
+            if (chan) {
+              if (data.photo_url !== undefined) chan.photo_url = data.photo_url;
+              if (data.thumbnail_url !== undefined) chan.thumbnail_url = data.thumbnail_url;
+              if (data.display_name !== undefined) chan.display_name = data.display_name;
+              if (data.stream_title !== undefined) chan.stream_title = data.stream_title;
+              if (data.category !== undefined) chan.category = data.category;
+              if (data.schedule !== undefined) (chan as any).schedule = data.schedule;
+              if (data.is_live !== undefined) chan.is_live = Boolean(data.is_live);
+              if (data.viewer_count !== undefined) chan.viewer_count = Number(data.viewer_count);
+            }
+          }
+        }
       }
-    }
+    };
+
+    await Promise.race([
+      fetchFromFirestore(),
+      new Promise<void>((resolve) => setTimeout(() => {
+        console.warn("[Firestore Sync] Timeout reached (2000ms). Falling back to cached memory data.");
+        resolve();
+      }, 2000))
+    ]);
   } catch (err: any) {
     console.warn("[Firestore getMasterChannel sync notice]:", err.message);
   }
@@ -314,7 +363,9 @@ app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 async function startServer() {
   db.channels.clear();
-  await getMasterChannel();
+  getMasterChannel().catch((err) => {
+    console.warn("Failed to pre-warm master channel in background:", err.message);
+  });
 
   app.get("/api/channels/mine", async (req, res) => {
     try {
@@ -338,8 +389,66 @@ async function startServer() {
 
   app.get("/api/channels", async (req, res) => {
     try {
-      const channel = await getMasterChannel();
-      return res.json([channelPublic(channel)]);
+      const masterChannel = await getMasterChannel();
+      const channelsList: any[] = [channelPublic(masterChannel)];
+
+      const seenUsernames = new Set<string>();
+      const seenUids = new Set<string>();
+
+      seenUsernames.add("djsparkz");
+      if (masterChannel.user_uid) {
+        seenUids.add(masterChannel.user_uid);
+      }
+
+      try {
+        const dbFirestore = admin.firestore();
+        const snapshot = await dbFirestore.collection("channels").get();
+        
+        snapshot.forEach((doc) => {
+          const docId = doc.id;
+          const data = doc.data();
+          if (!data) return;
+
+          const username = (data.username || "").toLowerCase().trim();
+          const userUid = (data.user_uid || docId || "").trim();
+
+          if (!username || username === "undefined" || username === "null") return;
+          if (username === "djsparkz" || userUid === "nsU1v44XFnN3FloJvNePqj6cBG2") return;
+
+          const cDoc: ChannelDoc = {
+            channel_id: docId,
+            user_uid: userUid,
+            username: data.username || docId,
+            display_name: data.display_name || data.username || docId,
+            photo_url: data.photo_url || null,
+            thumbnail_url: data.thumbnail_url || null,
+            ivs_channel_arn: data.ivs_channel_arn || "",
+            stream_key: data.stream_key || "",
+            playback_id: data.playback_id || data.playback_url || data.playbackUrl || "",
+            stream_title: data.stream_title || `${data.display_name || data.username || docId}'s Live Stream`,
+            category: data.category || "music",
+            is_live: Boolean(data.is_live || data.isLive),
+            viewer_count: Number(data.viewer_count || 0),
+            record_enabled: Boolean(data.record_enabled !== false),
+            last_updated: data.last_updated || new Date().toISOString(),
+            rtmp_url: data.rtmp_url || "",
+          };
+
+          if (isDummyOrInvalid(cDoc)) return;
+          if (seenUsernames.has(username) || seenUids.has(userUid)) return;
+
+          seenUsernames.add(username);
+          if (userUid) {
+            seenUids.add(userUid);
+          }
+
+          channelsList.push(channelPublic(cDoc));
+        });
+      } catch (fsErr: any) {
+        console.warn("[Firestore channels list sync warning]:", fsErr.message);
+      }
+
+      return res.json(channelsList);
     } catch (err: any) {
       return res.status(500).json({ error: "Failed to list channels" });
     }
@@ -347,6 +456,61 @@ async function startServer() {
 
   app.get("/api/channels/:id", async (req, res) => {
     try {
+      const requestedId = req.params.id;
+      const normalizedId = (requestedId || "").toLowerCase().trim();
+
+      if (normalizedId === "djsparkz" || normalizedId === "nsu1v44xfnn3flojvnepqj6cbg2") {
+        const channel = await getMasterChannel();
+        return res.json(channelPublic(channel, { include_stream_key: true }));
+      }
+
+      try {
+        const dbFirestore = admin.firestore();
+        let docSnap = await dbFirestore.collection("channels").doc(requestedId).get();
+        if (!docSnap.exists) {
+          const querySnap = await dbFirestore.collection("channels")
+            .where("username", "==", requestedId)
+            .limit(1)
+            .get();
+          if (!querySnap.empty) {
+            docSnap = querySnap.docs[0];
+          }
+        }
+
+        if (docSnap.exists) {
+          const data = docSnap.data();
+          if (data) {
+            const userUid = data.user_uid || docSnap.id || "";
+            const username = data.username || docSnap.id || "";
+
+            const cDoc: ChannelDoc = {
+              channel_id: docSnap.id,
+              user_uid: userUid,
+              username: username,
+              display_name: data.display_name || username,
+              photo_url: data.photo_url || null,
+              thumbnail_url: data.thumbnail_url || null,
+              ivs_channel_arn: data.ivs_channel_arn || "",
+              stream_key: data.stream_key || "",
+              playback_id: data.playback_id || data.playback_url || data.playbackUrl || "",
+              stream_title: data.stream_title || `${data.display_name || username}'s Live Stream`,
+              category: data.category || "music",
+              is_live: Boolean(data.is_live || data.isLive),
+              viewer_count: Number(data.viewer_count || 0),
+              record_enabled: Boolean(data.record_enabled !== false),
+              last_updated: data.last_updated || new Date().toISOString(),
+              rtmp_url: data.rtmp_url || "",
+            };
+
+            if (!isDummyOrInvalid(cDoc)) {
+              return res.json(channelPublic(cDoc, { include_stream_key: true }));
+            }
+          }
+        }
+      } catch (fsErr: any) {
+        console.warn("[Firestore single channel fetch warning]:", fsErr.message);
+      }
+
       const channel = await getMasterChannel();
       return res.json(channelPublic(channel, { include_stream_key: true }));
     } catch (err: any) {
