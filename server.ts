@@ -202,7 +202,7 @@ function channelPublic(c: ChannelDoc, opts: { include_stream_key?: boolean } = {
     photoUrl: activePhoto,
     avatar: activePhoto,
     avatar_url: activePhoto,
-    thumbnail_url: activePhoto,
+    thumbnail_url: c.thumbnail_url || null,
     playback_id: playbackId,
     playbackUrl: playbackId,
     stream_title: "djsparkz's Live Stream",
@@ -392,6 +392,39 @@ async function startServer() {
 
   api.post("/users/me/photo", upload.single("photo"), handlePhotoUpload);
   api.put("/users/me/photo", upload.single("photo"), handlePhotoUpload);
+
+  api.post("/channels/mine/thumbnail", upload.single("thumbnail"), async (req, res) => {
+    try {
+      const channel = await getMasterChannel();
+      let thumbnailUrl = channel.thumbnail_url || null;
+
+      if (req.file) {
+        thumbnailUrl = `/api/files/${req.file.filename}`;
+      } else if (req.body?.thumbnail || req.body?.image || req.body?.file) {
+        thumbnailUrl = req.body.thumbnail || req.body.image || req.body.file;
+      }
+
+      channel.thumbnail_url = thumbnailUrl;
+
+      return res.json({
+        success: true,
+        thumbnail_url: thumbnailUrl,
+        thumbnailUrl: thumbnailUrl,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: "Failed to update channel thumbnail", details: err.message });
+    }
+  });
+
+  api.delete("/channels/mine/thumbnail", async (req, res) => {
+    try {
+      const channel = await getMasterChannel();
+      channel.thumbnail_url = null;
+      return res.json({ success: true });
+    } catch (err: any) {
+      return res.status(500).json({ error: "Failed to clear channel thumbnail" });
+    }
+  });
 
   api.use("/files", express.static(uploadsDir));
   app.use("/api", api);
