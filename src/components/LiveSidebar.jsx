@@ -62,9 +62,16 @@ function getNormalizedKey(data, docId) {
 }
 
 function getDisplayName(c) {
+  const cid = c?.channel_id || c?.id;
+  if (cid === "nsU1v44XFnN3FloJvNePqj6cBG2" || c?.user_uid === "nsU1v44XFnN3FloJvNePqj6cBG2" || c?.username === "djsparkz") {
+    return "djsparkz";
+  }
   if (c?.display_name && typeof c.display_name === "string" && c.display_name.trim()) {
     const trimmed = c.display_name.trim();
-    if (!isDocId(trimmed) && trimmed.toLowerCase() !== "undefined") return trimmed;
+    if (!isDocId(trimmed) && trimmed.toLowerCase() !== "undefined") {
+      if (trimmed === "SPARKS 108 FM") return "djsparkz";
+      return trimmed;
+    }
   }
   if (c?.username && typeof c.username === "string" && c.username.trim()) {
     const trimmed = c.username.trim();
@@ -74,12 +81,18 @@ function getDisplayName(c) {
 }
 
 function getTargetUsername(c) {
+  const cid = c?.channel_id || c?.id;
+  if (cid === "nsU1v44XFnN3FloJvNePqj6cBG2" || c?.user_uid === "nsU1v44XFnN3FloJvNePqj6cBG2" || c?.username === "djsparkz") {
+    return "djsparkz";
+  }
+
   const uName = cleanString(c?.username);
   if (uName) return uName;
 
   if (c?.display_name && typeof c.display_name === "string" && c.display_name.trim()) {
     const trimmed = c.display_name.trim();
     if (!isDocId(trimmed) && trimmed.toLowerCase() !== "undefined") {
+      if (trimmed === "SPARKS 108 FM") return "djsparkz";
       return trimmed.toLowerCase().replace(/\s+/g, "_");
     }
   }

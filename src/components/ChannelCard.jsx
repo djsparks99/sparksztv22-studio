@@ -14,8 +14,36 @@ function hashPick(str, arr) {
   return arr[Math.abs(h) % arr.length];
 }
 
+function isDocId(str) {
+  if (!str || typeof str !== "string") return false;
+  const trimmed = str.trim();
+  return (
+    trimmed.length >= 20 &&
+    /^[A-Za-z0-9_-]+$/.test(trimmed)
+  );
+}
+
+function getCleanUsername(channel) {
+  const username = channel?.username;
+  if (username && typeof username === "string" && !isDocId(username) && username !== "undefined" && username !== "null") {
+    return username.trim();
+  }
+
+  const display = channel?.display_name;
+  if (display && typeof display === "string" && !isDocId(display) && display !== "undefined" && display !== "null") {
+    return display.trim().toLowerCase().replace(/\s+/g, "_");
+  }
+
+  const cid = channel?.channel_id || channel?.id;
+  if (cid === "nsU1v44XFnN3FloJvNePqj6cBG2" || channel?.user_uid === "nsU1v44XFnN3FloJvNePqj6cBG2") {
+    return "djsparkz";
+  }
+
+  return "djsparkz";
+}
+
 export default function ChannelCard({ channel }) {
-  const channelSlug = channel?.username || channel?.channel_id || channel?.id || "djsparkz";
+  const channelSlug = getCleanUsername(channel);
   const thumb = channel?.thumbnail_url
     ? fileUrl(channel.thumbnail_url)
     : hashPick(channelSlug, THUMBS);
@@ -66,7 +94,7 @@ export default function ChannelCard({ channel }) {
             {channel.stream_title || "Untitled stream"}
           </div>
           <div className="mt-1 truncate font-mono text-xs text-zinc-400">
-            @{channel.username || channel.display_name || channelSlug}
+            @{channelSlug}
           </div>
           <div className="mt-2">
             <span className="chip">{channel.category}</span>

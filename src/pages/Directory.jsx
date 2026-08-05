@@ -419,15 +419,44 @@ function directoryHashPick(str, arr) {
   return arr[Math.abs(h) % arr.length];
 }
 
+function isDocId(str) {
+  if (!str || typeof str !== "string") return false;
+  const trimmed = str.trim();
+  return (
+    trimmed.length >= 20 &&
+    /^[A-Za-z0-9_-]+$/.test(trimmed)
+  );
+}
+
+function getCleanUsername(channel) {
+  const username = channel?.username;
+  if (username && typeof username === "string" && !isDocId(username) && username !== "undefined" && username !== "null") {
+    return username.trim();
+  }
+
+  const display = channel?.display_name;
+  if (display && typeof display === "string" && !isDocId(display) && display !== "undefined" && display !== "null") {
+    return display.trim().toLowerCase().replace(/\s+/g, "_");
+  }
+
+  const cid = channel?.channel_id || channel?.id;
+  if (cid === "nsU1v44XFnN3FloJvNePqj6cBG2" || channel?.user_uid === "nsU1v44XFnN3FloJvNePqj6cBG2") {
+    return "djsparkz";
+  }
+
+  return "djsparkz";
+}
+
 function StreamerCard({ channel }) {
+  const cleanUsername = getCleanUsername(channel);
   const isLive = Boolean(channel.is_live);
   const nextSet = Array.isArray(channel.schedule) && channel.schedule.length > 0 ? channel.schedule[0] : null;
-  const channelSlug = channel.username || channel.channel_id || "channel";
+  const channelSlug = cleanUsername;
 
   return (
     <div
       className="group flex flex-col justify-between border border-[#27272a] bg-[#0a0a0a] p-6 transition-all hover:border-[#e5ff00]"
-      data-testid={`streamer-card-${channel.username}`}
+      data-testid={`streamer-card-${cleanUsername}`}
     >
       <div>
         {/* Top Header Row */}
@@ -436,7 +465,7 @@ function StreamerCard({ channel }) {
             {channel.photo_url ? (
               <img
                 src={fileUrl(channel.photo_url)}
-                alt={channel.display_name}
+                alt={channel.display_name && !isDocId(channel.display_name) ? channel.display_name : cleanUsername}
                 className="h-12 w-12 border border-[#27272a] object-cover grayscale contrast-125 group-hover:grayscale-0 transition-all"
               />
             ) : (
@@ -446,9 +475,9 @@ function StreamerCard({ channel }) {
             )}
             <div className="min-w-0">
               <h2 className="truncate font-display text-lg font-black text-white group-hover:text-[#e5ff00] transition-colors">
-                {channel.display_name || channel.username}
+                {channel.display_name && !isDocId(channel.display_name) && channel.display_name !== "SPARKS 108 FM" ? channel.display_name : cleanUsername}
               </h2>
-              <p className="font-mono text-xs text-zinc-500">@{channel.username}</p>
+              <p className="font-mono text-xs text-zinc-500">@{cleanUsername}</p>
             </div>
           </div>
 
@@ -506,13 +535,13 @@ function StreamerCard({ channel }) {
       {/* Footer Action Button */}
       <div className="mt-6 border-t border-[#27272a] pt-4">
         <Link
-          to={`/channel/${channel.username}`}
+          to={`/channel/${cleanUsername}`}
           className={`w-full text-center inline-flex items-center justify-center gap-2 py-2.5 font-mono text-xs uppercase tracking-[0.2em] transition-all ${
             isLive
               ? "btn-primary"
               : "border border-[#27272a] bg-black text-zinc-300 hover:border-white hover:text-white"
           }`}
-          data-testid={`tune-in-btn-${channel.username}`}
+          data-testid={`tune-in-btn-${cleanUsername}`}
         >
           <Radio className="h-3.5 w-3.5" />
           {isLive ? "TUNE IN NOW" : "VIEW CHANNEL"}

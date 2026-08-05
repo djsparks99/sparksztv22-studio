@@ -51,17 +51,31 @@ export default function TopStreamersHero({ allChannels = [] }) {
     return true;
   });
 
-  // Identify currently active live stream with the highest viewer count
-  const liveChannels = validChannels.filter((c) => Boolean(c.is_live || c.isLive));
-  const sortedLiveStreamers = [...liveChannels].sort((a, b) => {
+  // Sort all active or available channels by viewer_count in descending order
+  const sortedChannels = [...validChannels].sort((a, b) => {
     const aViews = Number(a.viewer_count || a.viewerCount || a.views || 0);
     const bViews = Number(b.viewer_count || b.viewerCount || b.views || 0);
-    return bViews - aViews;
+    if (bViews !== aViews) {
+      return bViews - aViews;
+    }
+    // If viewer counts are equal, prioritize live channels
+    const aLive = Boolean(a.is_live || a.isLive);
+    const bLive = Boolean(b.is_live || b.isLive);
+    if (aLive !== bLive) {
+      return bLive ? 1 : -1;
+    }
+    // Secondary tie-breaker: djsparkz
+    const aSparkz = (a.username || "").toLowerCase() === "djsparkz";
+    const bSparkz = (b.username || "").toLowerCase() === "djsparkz";
+    if (aSparkz !== bSparkz) {
+      return bSparkz ? 1 : -1;
+    }
+    return 0;
   });
 
-  const liveStreamer = sortedLiveStreamers[0] || null;
+  const liveChannels = validChannels.filter((c) => Boolean(c.is_live || c.isLive));
 
-  // Fallback state if no live stream is currently active
+  // Fallback state if no active stream is found
   const fallbackStreamer = validChannels.find(
     (c) => (c.username || "").toLowerCase() === "djsparkz"
   ) || validChannels[0] || {
@@ -75,7 +89,7 @@ export default function TopStreamersHero({ allChannels = [] }) {
     is_live: false,
   };
 
-  const activeStreamer = liveStreamer || fallbackStreamer;
+  const activeStreamer = sortedChannels[0] || fallbackStreamer;
   const isLive = Boolean(activeStreamer.is_live || activeStreamer.isLive);
   const activeSlug = activeStreamer.username || activeStreamer.channel_id || activeStreamer.id || "channel";
   const activeViews = Number(activeStreamer.viewer_count || activeStreamer.viewerCount || activeStreamer.views || 0);
@@ -169,7 +183,14 @@ export default function TopStreamersHero({ allChannels = [] }) {
 
           {/* Right Column: Featured Stream Preview Card */}
           <div className="lg:col-span-7" id="featured-streamer-player">
-            <div className="group flex flex-col overflow-hidden border border-[#27272a] bg-[#0a0a0a] transition-all hover:border-[#e5ff00] w-full shadow-2xl">
+            <div className="group flex flex-col overflow-hidden border border-[#27272a] bg-[#0a0a0a] transition-all hover:border-[#e5ff00] w-full shadow-2xl relative">
+              {/* Cover/preview thumbnail uploaded from dashboard as its background when offline */}
+              {!isLive && thumbnailSource && (
+                <div 
+                  className="absolute inset-0 bg-cover bg-center opacity-[0.07] blur-md pointer-events-none"
+                  style={{ backgroundImage: `url(${activeThumb})` }}
+                />
+              )}
               {/* Thumbnail / Image banner */}
               <div className="relative aspect-[16/9] max-h-[360px] w-full overflow-hidden bg-black sm:max-h-[400px]">
                 {isLive ? (
@@ -179,6 +200,8 @@ export default function TopStreamersHero({ allChannels = [] }) {
                       isLive={true}
                       muted={true}
                       autoPlay={true}
+                      controls={false}
+                      poster={activeThumb}
                     />
                   </div>
                 ) : (

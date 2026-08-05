@@ -8,6 +8,8 @@ export default function HlsPlayer({
   autoPlay = true,
   muted = true,
   streamTitle = "Live Stream",
+  controls = true,
+  poster = null,
 }) {
   const playerRef = useRef(null);
   const videoRef = useRef(null);
@@ -163,13 +165,14 @@ export default function HlsPlayer({
         playsInline
         muted={isMuted}
         autoPlay={autoPlay}
+        poster={poster}
         className="h-full w-full object-contain"
         onPlay={() => setIsPlaying(true)}
         onPause={() => setIsPlaying(false)}
       />
 
       {/* Initial Muted Autoplay Warning Banner if Muted */}
-      {isMuted && isPlaying && (
+      {controls && isMuted && isPlaying && (
         <button
           onClick={toggleMute}
           data-testid="unmute-overlay-btn"
@@ -181,124 +184,126 @@ export default function HlsPlayer({
       )}
 
       {/* Control Bar */}
-      <div className="absolute inset-x-0 bottom-0 z-20 flex items-center justify-between bg-gradient-to-t from-black/90 via-black/50 to-transparent p-4 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-        <div className="flex items-center gap-3">
-          {/* Play / Pause */}
-          <button
-            onClick={togglePlay}
-            data-testid="player-play-btn"
-            className="text-white hover:text-[#e5ff00]"
-            title={isPlaying ? "Pause" : "Play"}
-          >
-            {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
-          </button>
-
-          {/* Stop Button */}
-          <button
-            onClick={stopStream}
-            data-testid="player-stop-btn"
-            className="text-white hover:text-red-400"
-            title="Stop Playback"
-          >
-            <Square className="h-4 w-4 fill-current" />
-          </button>
-
-          {/* Volume Control */}
-          <div className="flex items-center gap-2">
+      {controls && (
+        <div className="absolute inset-x-0 bottom-0 z-20 flex items-center justify-between bg-gradient-to-t from-black/90 via-black/50 to-transparent p-4 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
+          <div className="flex items-center gap-3">
+            {/* Play / Pause */}
             <button
-              onClick={toggleMute}
-              data-testid="player-mute-btn"
+              onClick={togglePlay}
+              data-testid="player-play-btn"
               className="text-white hover:text-[#e5ff00]"
-              title={isMuted ? "Unmute" : "Mute"}
+              title={isPlaying ? "Pause" : "Play"}
             >
-              {isMuted || volume === 0 ? (
-                <VolumeX className="h-5 w-5 text-red-400" />
-              ) : (
-                <Volume2 className="h-5 w-5" />
-              )}
+              {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
             </button>
-            <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.05"
-              value={isMuted ? 0 : volume}
-              onChange={handleVolumeChange}
-              data-testid="player-volume-slider"
-              className="h-1.5 w-16 accent-[#e5ff00] cursor-pointer"
-            />
-          </div>
 
-          <div className="flex items-center gap-2 border-l border-zinc-700 pl-3">
-            <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75"></span>
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500"></span>
-            </span>
-            <span className="font-mono text-[10px] font-bold tracking-widest text-white">
-              LIVE
-            </span>
-          </div>
-        </div>
+            {/* Stop Button */}
+            <button
+              onClick={stopStream}
+              data-testid="player-stop-btn"
+              className="text-white hover:text-red-400"
+              title="Stop Playback"
+            >
+              <Square className="h-4 w-4 fill-current" />
+            </button>
 
-        {/* Right Controls: Quality Selector & Fullscreen */}
-        <div className="relative flex items-center gap-3">
-          {/* Quality Submenu */}
-          {levels.length > 0 && (
-            <div className="relative">
+            {/* Volume Control */}
+            <div className="flex items-center gap-2">
               <button
-                onClick={() => setShowQualityMenu(!showQualityMenu)}
-                data-testid="player-quality-btn"
-                className="flex items-center gap-1.5 font-mono text-xs font-bold text-zinc-300 hover:text-[#e5ff00]"
-                title="Select Quality"
+                onClick={toggleMute}
+                data-testid="player-mute-btn"
+                className="text-white hover:text-[#e5ff00]"
+                title={isMuted ? "Unmute" : "Mute"}
               >
-                <Settings className="h-4 w-4" />
-                <span>
-                  {currentLevel === -1
-                    ? "AUTO"
-                    : `${levels[currentLevel]?.height || "HD"}p`}
-                </span>
+                {isMuted || volume === 0 ? (
+                  <VolumeX className="h-5 w-5 text-red-400" />
+                ) : (
+                  <Volume2 className="h-5 w-5" />
+                )}
               </button>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={isMuted ? 0 : volume}
+                onChange={handleVolumeChange}
+                data-testid="player-volume-slider"
+                className="h-1.5 w-16 accent-[#e5ff00] cursor-pointer"
+              />
+            </div>
 
-              {showQualityMenu && (
-                <div
-                  data-testid="player-quality-menu"
-                  className="absolute bottom-8 right-0 z-30 min-w-[120px] rounded border border-[#333] bg-[#0f0f11] py-1 shadow-xl"
+            <div className="flex items-center gap-2 border-l border-zinc-700 pl-3">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75"></span>
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500"></span>
+              </span>
+              <span className="font-mono text-[10px] font-bold tracking-widest text-white">
+                LIVE
+              </span>
+            </div>
+          </div>
+
+          {/* Right Controls: Quality Selector & Fullscreen */}
+          <div className="relative flex items-center gap-3">
+            {/* Quality Submenu */}
+            {levels.length > 0 && (
+              <div className="relative">
+                <button
+                  onClick={() => setShowQualityMenu(!showQualityMenu)}
+                  data-testid="player-quality-btn"
+                  className="flex items-center gap-1.5 font-mono text-xs font-bold text-zinc-300 hover:text-[#e5ff00]"
+                  title="Select Quality"
                 >
-                  <button
-                    onClick={() => selectQuality(-1)}
-                    className={`block w-full px-3 py-1.5 text-left font-mono text-xs ${
-                      currentLevel === -1 ? "text-[#e5ff00] font-bold" : "text-zinc-300"
-                    } hover:bg-zinc-800`}
+                  <Settings className="h-4 w-4" />
+                  <span>
+                    {currentLevel === -1
+                      ? "AUTO"
+                      : `${levels[currentLevel]?.height || "HD"}p`}
+                  </span>
+                </button>
+
+                {showQualityMenu && (
+                  <div
+                    data-testid="player-quality-menu"
+                    className="absolute bottom-8 right-0 z-30 min-w-[120px] rounded border border-[#333] bg-[#0f0f11] py-1 shadow-xl"
                   >
-                    AUTO (Adaptive)
-                  </button>
-                  {levels.map((lvl, index) => (
                     <button
-                      key={index}
-                      onClick={() => selectQuality(index)}
+                      onClick={() => selectQuality(-1)}
                       className={`block w-full px-3 py-1.5 text-left font-mono text-xs ${
-                        currentLevel === index ? "text-[#e5ff00] font-bold" : "text-zinc-300"
+                        currentLevel === -1 ? "text-[#e5ff00] font-bold" : "text-zinc-300"
                       } hover:bg-zinc-800`}
                     >
-                      {lvl.height}p ({Math.round(lvl.bitrate / 1000)}k)
+                      AUTO (Adaptive)
                     </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+                    {levels.map((lvl, index) => (
+                      <button
+                        key={index}
+                        onClick={() => selectQuality(index)}
+                        className={`block w-full px-3 py-1.5 text-left font-mono text-xs ${
+                          currentLevel === index ? "text-[#e5ff00] font-bold" : "text-zinc-300"
+                        } hover:bg-zinc-800`}
+                      >
+                        {lvl.height}p ({Math.round(lvl.bitrate / 1000)}k)
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
-          {/* Fullscreen Button */}
-          <button
-            onClick={toggleFullscreen}
-            data-testid="player-fullscreen-btn"
-            className="text-white hover:text-[#e5ff00]"
-            title="Fullscreen"
-          >
-            <Maximize className="h-5 w-5" />
-          </button>
+            {/* Fullscreen Button */}
+            <button
+              onClick={toggleFullscreen}
+              data-testid="player-fullscreen-btn"
+              className="text-white hover:text-[#e5ff00]"
+              title="Fullscreen"
+            >
+              <Maximize className="h-5 w-5" />
+            </button>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
