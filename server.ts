@@ -7,6 +7,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
+import multer from "multer";
 import admin from "firebase-admin";
 
 import { 
@@ -17,7 +18,7 @@ import {
 
 dotenv.config();
 
-console.log("SPARKZ.TV - Server booting up with accurate live status check.");
+console.log("SPARKZ.TV - Server booting up with photo upload support & clean channel cache.");
 
 try {
   if (!admin.apps || admin.apps.length === 0) {
@@ -89,6 +90,12 @@ const uploadsDir = path.join(process.cwd(), "uploads");
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
+
+// Configure Multer for profile image uploads
+const upload = multer({
+  dest: uploadsDir,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB file size limit
+});
 
 interface UserDoc {
   uid: string;
@@ -228,7 +235,7 @@ async function getOrCreateChannelForUser(uid: string, username: string, forceNew
     playback_id: ivsData.playbackUrl,
     stream_title: "djsparkz's Live Stream",
     category: "music",
-    is_live: false, // Default to false until OBS actively streams
+    is_live: false,
     viewer_count: 0,
     record_enabled: true,
     last_updated: new Date().toISOString(),
@@ -256,12 +263,18 @@ app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 async function startServer() {
+  // Clear any stale legacy channel entries on boot
+  db.channels.clear();
+
   app.get("/api/channels/mine", async (req, res) => {
     try {
       const user = (await authenticateToken(req)) || db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2")!;
-      const channel = await getOrCreateChannelForUser(user.uid, "djsparkz");
-      const myChannel = db.channels.get(user.uid)!;
-      const publicData = channelPublic(myChannel, { include_stream_key: true });
+      let channel = db.channels.get(user.uid);
+      if (!channel) {
+        await getOrCreateChannelForUser(user.uid, "djsparkz");
+        channel = db.channels.get(user.uid)!;
+      }
+      const publicData = channelPublic(channel, { include_stream_key: true });
 
       return res.json({
         ...publicData,
@@ -343,14 +356,12 @@ async function startServer() {
       if (chan) chan.is_live = false;
       return res.json({ isActive: false, isLive: false, is_live: false });
     } catch (e) {
-      const user = db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2");
-      const chan = db.channels.get(user?.uid || "");
-      if (chan) chan.is_live = false;
       return res.json({ isActive: false, isLive: false, is_live: false });
     }
   });
 
   const api = express.Router();
+  
   api.get("/users/me", async (req, res) => {
     const user = (await authenticateToken(req)) || db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2")!;
     return res.json({
@@ -359,6 +370,42 @@ async function startServer() {
       display_name: "djsparkz",
     });
   });
+
+  // Profile Photo Upload Endpoints (Supports file upload AND base64/URL JSON payload)
+  const handlePhotoUpload = async (req: Request, res: Response) => {
+    try {
+      const user = (await authenticateToken(req)) || db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2")!;
+      let photoUrl = user.photo_url;
+
+      if (req.file) {
+        photoUrl = `/api/files/${req.file.filename}`;
+      } else if (req.body?.photo_url || req.body?.photoUrl || req.body?.photo) {
+        photoUrl = req.body.photo_url || req.body.photoUrl || req.body.photo;
+      }
+
+      user.photo_url = photoUrl;
+      const chan = db.channels.get(user.uid);
+      if (chan) {
+        chan.photo_url = photoUrl;
+      }
+
+      return res.json({
+        success: true,
+        photo_url: photoUrl,
+        photoUrl: photoUrl,
+        user: {
+          ...user,
+          username: "djsparkz",
+          display_name: "djsparkz",
+        },
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: "Failed to update profile photo", details: err.message });
+    }
+  };
+
+  api.post("/users/me/photo", upload.single("photo"), handlePhotoUpload);
+  api.put("/users/me/photo", upload.single("photo"), handlePhotoUpload);
 
   api.use("/files", express.static(uploadsDir));
   app.use("/api", api);
