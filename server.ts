@@ -225,15 +225,64 @@ function channelPublic(c: ChannelDoc, opts: { include_stream_key?: boolean } = {
 
 async function getMasterChannel() {
   let chan = db.channels.get("djsparkz") || db.channels.get("nsU1v44XFnN3FloJvNePqj6cBG2");
-  const user = db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2");
+  const user = db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2")!;
   
+  try {
+    const dbFirestore = admin.firestore();
+    const userSnap = await dbFirestore.collection("users").doc("nsU1v44XFnN3FloJvNePqj6cBG2").get();
+    if (userSnap.exists) {
+      const data = userSnap.data();
+      if (data) {
+        if (data.photo_url !== undefined) user.photo_url = data.photo_url;
+        if (data.display_name !== undefined) user.display_name = data.display_name;
+        if (data.bio !== undefined) user.bio = data.bio;
+      }
+    }
+    
+    const channelSnap = await dbFirestore.collection("channels").doc("djsparkz").get();
+    if (channelSnap.exists) {
+      const data = channelSnap.data();
+      if (data) {
+        if (chan) {
+          if (data.photo_url !== undefined) chan.photo_url = data.photo_url;
+          if (data.thumbnail_url !== undefined) chan.thumbnail_url = data.thumbnail_url;
+          if (data.display_name !== undefined) chan.display_name = data.display_name;
+          if (data.stream_title !== undefined) chan.stream_title = data.stream_title;
+          if (data.category !== undefined) chan.category = data.category;
+          if (data.schedule !== undefined) (chan as any).schedule = data.schedule;
+          if (data.is_live !== undefined) chan.is_live = Boolean(data.is_live);
+          if (data.viewer_count !== undefined) chan.viewer_count = Number(data.viewer_count);
+        }
+      }
+    } else {
+      const channelSnapUid = await dbFirestore.collection("channels").doc("nsU1v44XFnN3FloJvNePqj6cBG2").get();
+      if (channelSnapUid.exists) {
+        const data = channelSnapUid.data();
+        if (data) {
+          if (chan) {
+            if (data.photo_url !== undefined) chan.photo_url = data.photo_url;
+            if (data.thumbnail_url !== undefined) chan.thumbnail_url = data.thumbnail_url;
+            if (data.display_name !== undefined) chan.display_name = data.display_name;
+            if (data.stream_title !== undefined) chan.stream_title = data.stream_title;
+            if (data.category !== undefined) chan.category = data.category;
+            if (data.schedule !== undefined) (chan as any).schedule = data.schedule;
+            if (data.is_live !== undefined) chan.is_live = Boolean(data.is_live);
+            if (data.viewer_count !== undefined) chan.viewer_count = Number(data.viewer_count);
+          }
+        }
+      }
+    }
+  } catch (err: any) {
+    console.warn("[Firestore getMasterChannel sync notice]:", err.message);
+  }
+
   if (!chan) {
     const ivsData = await getOrCreatePersistentIvsChannel("djsparkz");
     chan = {
       channel_id: "djsparkz",
       user_uid: "nsU1v44XFnN3FloJvNePqj6cBG2",
       username: "djsparkz",
-      display_name: "djsparkz",
+      display_name: user?.display_name || "djsparkz",
       photo_url: user?.photo_url || null,
       thumbnail_url: null,
       ivs_channel_arn: ivsData.arn,

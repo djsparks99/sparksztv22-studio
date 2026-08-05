@@ -137,6 +137,9 @@ export default function Directory() {
             if (fsData) {
               return {
                 ...c,
+                photo_url: fsData.photo_url || c.photo_url,
+                display_name: fsData.display_name || c.display_name,
+                thumbnail_url: fsData.thumbnail_url || c.thumbnail_url,
                 is_live: Boolean(fsData.is_live ?? fsData.isLive ?? c.is_live),
                 viewer_count: fsData.viewer_count ?? c.viewer_count,
                 stream_title: fsData.stream_title || c.stream_title,
