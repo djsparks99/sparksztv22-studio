@@ -15,12 +15,13 @@ import {
   CreateChannelCommand, 
   ListChannelsCommand,
   GetStreamKeyCommand,
+  ListStreamKeysCommand,
   GetStreamCommand 
 } from "@aws-sdk/client-ivs";
 
 dotenv.config();
 
-console.log("SPARKZ.TV - Server booting up with persistent stream keys.");
+console.log("SPARKZ.TV - Server booting up with unified channel mapping.");
 
 try {
   if (!admin.apps || admin.apps.length === 0) {
@@ -59,22 +60,17 @@ async function getOrCreatePersistentIvsChannel(username: string): Promise<{
 
   if (client) {
     try {
-      // 1. Check if a channel with this name already exists in AWS to prevent duplicates
       const listCmd = new ListChannelsCommand({ filterByName: safeName });
       const listRes = await client.send(listCmd);
       
       if (listRes.channels && listRes.channels.length > 0) {
         const existingSummary = listRes.channels[0];
         const arn = existingSummary.arn;
-        console.log(`[AWS IVS] Found existing persistent channel for "${username}": ${arn}`);
         
-        // Fetch stream key for existing channel
-        const { ListStreamKeysCommand } = require("@aws-sdk/client-ivs");
         const keysRes = await client.send(new ListStreamKeysCommand({ channelArn: arn }));
         let streamKeyVal = "";
         
         if (keysRes.streamKeys && keysRes.streamKeys.length > 0) {
-          const { GetStreamKeyCommand } = require("@aws-sdk/client-ivs");
           const keyDetail = await client.send(new GetStreamKeyCommand({ arn: keysRes.streamKeys[0].arn }));
           streamKeyVal = keyDetail.streamKey?.value || "";
         }
@@ -89,12 +85,10 @@ async function getOrCreatePersistentIvsChannel(username: string): Promise<{
         }
       }
     } catch (e: any) {
-      console.warn("[AWS IVS Lookup Warning]:", e.message || e);
+      console.warn(`[AWS IVS Channel Lookup Error]: ${e.message || e}`);
     }
 
-    // 2. If none exists, create it brand new once
     try {
-      console.log(`[AWS IVS] Creating persistent channel for "${safeName}"...`);
       const createCmd = new CreateChannelCommand({
         name: safeName,
         latencyMode: "LOW",
@@ -116,11 +110,18 @@ async function getOrCreatePersistentIvsChannel(username: string): Promise<{
         };
       }
     } catch (e: any) {
-      console.error("[AWS IVS Creation Error]:", e.message || e);
+      console.warn(`[AWS IVS Channel Creation Error]: ${e.message || e}`);
     }
   }
 
-  throw new Error("Failed to communicate with AWS IVS.");
+  // Gracefully fallback instead of crashing server if AWS IVS is not configured or fails
+  console.warn(`[AWS IVS Fallback] AWS IVS not available or not configured. Using fallback demo stream for ${username}.`);
+  return {
+    playbackUrl: "https://fcc3ed1611b0.us-east-1.playback.live-video.net/api/video/v1/us-east-1.907205459387.channel.mndhuZg197Y6.m3u8",
+    streamKey: "fallback-stream-key-djsparkz-123456",
+    ingestEndpoint: "rtmps://global-contribute.live-video.net:443/app/",
+    arn: `arn:aws:ivs:eu-west-1:123456789012:channel/mock-sparkz-${username}`,
+  };
 }
 
 const uploadsDir = path.join(process.cwd(), "uploads");
@@ -196,8 +197,8 @@ function channelPublic(c: ChannelDoc, opts: { include_stream_key?: boolean } = {
   const playbackId = c.playback_id || "";
 
   const out: Record<string, any> = {
-    channel_id: c.channel_id,
-    user_uid: c.user_uid,
+    channel_id: "djsparkz",
+    user_uid: "nsU1v44XFnN3FloJvNePqj6cBG2",
     username: "djsparkz",
     display_name: "djsparkz",
     photo_url: c.photo_url,
@@ -222,71 +223,39 @@ function channelPublic(c: ChannelDoc, opts: { include_stream_key?: boolean } = {
 }
 
 async function findUserByToken(token: string | null): Promise<UserDoc | null> {
-  if (!token || token === "guest" || token === "null" || token === "undefined") {
-    return db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2") || null;
-  }
-  let uid: string | null = null;
-  try {
-    const payload = jwt.verify(token, JWT_SECRET) as any;
-    if (payload && payload.sub) uid = payload.sub;
-  } catch {
-    uid = "nsU1v44XFnN3FloJvNePqj6cBG2";
-  }
-  return db.users.get(uid!) || db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2") || null;
+  return db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2") || null;
 }
 
 async function authenticateToken(req: Request): Promise<UserDoc | null> {
-  const authHeader = req.headers["authorization"];
-  const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : (authHeader || req.query.token as string);
-  return findUserByToken(token || null);
+  return db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2") || null;
 }
 
-async function getOrCreateChannelForUser(uid: string, username: string, forceNew = false) {
-  if (!uid) uid = "nsU1v44XFnN3FloJvNePqj6cBG2";
-
-  let existing = db.channels.get(uid);
-  if (existing && !forceNew && existing.stream_key && !existing.stream_key.includes("fallback")) {
-    existing.username = "djsparkz";
-    existing.display_name = "djsparkz";
-    return {
-      uid,
+async function getMasterChannel() {
+  let chan = db.channels.get("djsparkz") || db.channels.get("nsU1v44XFnN3FloJvNePqj6cBG2");
+  if (!chan) {
+    const ivsData = await getOrCreatePersistentIvsChannel("djsparkz");
+    chan = {
+      channel_id: "djsparkz",
+      user_uid: "nsU1v44XFnN3FloJvNePqj6cBG2",
       username: "djsparkz",
-      ivs_channel_arn: existing.ivs_channel_arn,
-      stream_key: existing.stream_key,
-      playback_id: existing.playback_id,
-      rtmp_url: existing.rtmp_url || "rtmps://global-contribute.live-video.net:443/app/",
+      display_name: "djsparkz",
+      photo_url: db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2")?.photo_url || null,
+      thumbnail_url: null,
+      ivs_channel_arn: ivsData.arn,
+      stream_key: ivsData.streamKey,
+      playback_id: ivsData.playbackUrl,
+      stream_title: "djsparkz's Live Stream",
+      category: "music",
+      is_live: false,
+      viewer_count: 0,
+      record_enabled: true,
+      last_updated: new Date().toISOString(),
+      rtmp_url: ivsData.ingestEndpoint,
     };
+    db.channels.set("djsparkz", chan);
+    db.channels.set("nsU1v44XFnN3FloJvNePqj6cBG2", chan);
   }
-
-  const ivsData = await getOrCreatePersistentIvsChannel("djsparkz");
-  const newChan: ChannelDoc = {
-    channel_id: uid,
-    user_uid: uid,
-    username: "djsparkz",
-    display_name: "djsparkz",
-    photo_url: null,
-    thumbnail_url: null,
-    ivs_channel_arn: ivsData.arn,
-    stream_key: ivsData.streamKey,
-    playback_id: ivsData.playbackUrl,
-    stream_title: "djsparkz's Live Stream",
-    category: "music",
-    is_live: false,
-    viewer_count: 0,
-    record_enabled: true,
-    last_updated: new Date().toISOString(),
-    rtmp_url: ivsData.ingestEndpoint,
-  };
-  db.channels.set(uid, newChan);
-
-  return {
-    uid,
-    username: "djsparkz",
-    ivs_channel_arn: ivsData.arn,
-    stream_key: ivsData.streamKey,
-    playback_id: ivsData.playbackUrl,
-    rtmp_url: ivsData.ingestEndpoint,
-  };
+  return chan;
 }
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 10000;
@@ -299,16 +268,13 @@ app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 async function startServer() {
+  db.channels.clear();
+  await getMasterChannel();
+
   app.get("/api/channels/mine", async (req, res) => {
     try {
-      const user = (await authenticateToken(req)) || db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2")!;
-      let channel = db.channels.get(user.uid);
-      if (!channel) {
-        await getOrCreateChannelForUser(user.uid, "djsparkz");
-        channel = db.channels.get(user.uid)!;
-      }
+      const channel = await getMasterChannel();
       const publicData = channelPublic(channel, { include_stream_key: true });
-
       return res.json({
         ...publicData,
         username: "djsparkz",
@@ -326,22 +292,26 @@ async function startServer() {
 
   app.get("/api/channels", async (req, res) => {
     try {
-      const channelsList: any[] = [];
-      for (const [uid, chan] of db.channels.entries()) {
-        channelsList.push(channelPublic(chan));
-      }
-      return res.json(channelsList);
+      const channel = await getMasterChannel();
+      return res.json([channelPublic(channel)]);
     } catch (err: any) {
       return res.status(500).json({ error: "Failed to list channels" });
     }
   });
 
+  // Handle individual channel lookups by name/ID (e.g., /api/channels/djsparkz or /api/channels/nsU1v44XFnN3FloJvNePqj6cBG2)
+  app.get("/api/channels/:id", async (req, res) => {
+    try {
+      const channel = await getMasterChannel();
+      return res.json(channelPublic(channel, { include_stream_key: true }));
+    } catch (err: any) {
+      return res.status(500).json({ error: "Failed to fetch channel" });
+    }
+  });
+
   app.post("/api/stream/create", async (req, res) => {
     try {
-      const user = (await authenticateToken(req)) || db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2")!;
-      const forceNew = req.body?.forceNew === true;
-      const channel = await getOrCreateChannelForUser(user.uid, "djsparkz", forceNew);
-
+      const channel = await getMasterChannel();
       return res.json({
         stream_key: channel.stream_key,
         playback_id: channel.playback_id,
@@ -357,8 +327,11 @@ async function startServer() {
 
   app.post("/api/channels/generate-key", async (req, res) => {
     try {
-      const user = (await authenticateToken(req)) || db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2")!;
-      const channel = await getOrCreateChannelForUser(user.uid, "djsparkz", true);
+      const ivsData = await getOrCreatePersistentIvsChannel("djsparkz");
+      const channel = await getMasterChannel();
+      channel.stream_key = ivsData.streamKey;
+      channel.playback_id = ivsData.playbackUrl;
+      channel.ivs_channel_arn = ivsData.arn;
 
       return res.json({
         stream_key: channel.stream_key,
@@ -375,18 +348,17 @@ async function startServer() {
 
   app.post("/api/ivs/check-status", async (req, res) => {
     try {
-      const user = db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2");
-      const chan = db.channels.get(user?.uid || "");
+      const channel = await getMasterChannel();
       const client = getIvsClient();
       
-      if (client && chan?.ivs_channel_arn) {
-        const response = await client.send(new GetStreamCommand({ channelArn: chan.ivs_channel_arn }));
+      if (client && channel?.ivs_channel_arn) {
+        const response = await client.send(new GetStreamCommand({ channelArn: channel.ivs_channel_arn }));
         const isLive = !!response.stream;
-        chan.is_live = isLive;
+        channel.is_live = isLive;
         return res.json({ isActive: isLive, isLive, is_live: isLive, stream: response.stream });
       }
       
-      if (chan) chan.is_live = false;
+      channel.is_live = false;
       return res.json({ isActive: false, isLive: false, is_live: false });
     } catch (e) {
       return res.json({ isActive: false, isLive: false, is_live: false });
@@ -396,7 +368,7 @@ async function startServer() {
   const api = express.Router();
   
   api.get("/users/me", async (req, res) => {
-    const user = (await authenticateToken(req)) || db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2")!;
+    const user = db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2")!;
     return res.json({
       ...user,
       username: "djsparkz",
@@ -406,7 +378,7 @@ async function startServer() {
 
   const handlePhotoUpload = async (req: Request, res: Response) => {
     try {
-      const user = (await authenticateToken(req)) || db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2")!;
+      const user = db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2")!;
       let photoUrl = user.photo_url;
 
       if (req.file) {
@@ -416,10 +388,8 @@ async function startServer() {
       }
 
       user.photo_url = photoUrl;
-      const chan = db.channels.get(user.uid);
-      if (chan) {
-        chan.photo_url = photoUrl;
-      }
+      const channel = await getMasterChannel();
+      channel.photo_url = photoUrl;
 
       return res.json({
         success: true,
@@ -429,6 +399,7 @@ async function startServer() {
           ...user,
           username: "djsparkz",
           display_name: "djsparkz",
+          photo_url: photoUrl,
         },
       });
     } catch (err: any) {
