@@ -7,22 +7,18 @@ import cors from "cors";
 import dotenv from "dotenv";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
-import multer from "multer";
-import { WebSocketServer, WebSocket } from "ws";
 import admin from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
 
 import { 
   IvsClient, 
   CreateChannelCommand, 
-  GetStreamCommand, 
-  ListChannelsCommand, 
-  ListStreamKeysCommand 
+  GetStreamCommand 
 } from "@aws-sdk/client-ivs";
 
 dotenv.config();
 
-console.log("SPARKZ.TV - Server booting up with live AWS IVS sync.");
+console.log("SPARKZ.TV - Server booting up with direct AWS IVS creation.");
 
 try {
   if (!admin.apps || admin.apps.length === 0) {
@@ -50,82 +46,45 @@ function getIvsClient() {
   return ivsClient;
 }
 
-async function getOrCreateIvsChannelDetails(username: string): Promise<{
+async function createDirectIvsChannel(username: string): Promise<{
   playbackUrl: string;
   streamKey: string;
   ingestEndpoint: string;
   arn: string;
 }> {
   const client = getIvsClient();
-  const safeName = username.replace(/[^a-zA-Z0-9-_]/g, "-");
+  const safeName = `sparkz-${username}-${Date.now().toString().slice(-4)}`;
 
   if (client) {
     try {
-      // 1. Check if channel already exists in AWS to avoid recreating duplicates
-      const listCmd = new ListChannelsCommand({});
-      const listRes = await client.send(listCmd);
-      const existingChannel = listRes.channels?.find(c => c.name === safeName);
+      console.log(`[AWS IVS] Creating direct channel for "${safeName}"...`);
+      const createCmd = new CreateChannelCommand({
+        name: safeName,
+        latencyMode: "LOW",
+        type: "STANDARD",
+      });
+      const createRes = await client.send(createCmd);
+      
+      const channelArn = createRes.channel?.arn || "";
+      const playbackUrl = createRes.channel?.playbackUrl || "";
+      const streamKeyVal = createRes.streamKey?.value || "";
+      const ingestEndpoint = createRes.channel?.ingestEndpoint || "global-contribute.live-video.net";
 
-      let channelArn = existingChannel?.arn;
-      let playbackUrl = existingChannel?.playbackUrl;
-      let ingestEndpoint = existingChannel?.ingestEndpoint || "rtmps://global-contribute.live-video.net:443/app/";
-
-      if (!channelArn) {
-        console.log(`[AWS IVS] Creating new channel for "${safeName}"...`);
-        const createCmd = new CreateChannelCommand({
-          name: safeName,
-          latencyMode: "LOW",
-          type: "STANDARD",
-        });
-        const createRes = await client.send(createCmd);
-        channelArn = createRes.channel?.arn;
-        playbackUrl = createRes.channel?.playbackUrl;
-        ingestEndpoint = createRes.channel?.ingestEndpoint || ingestEndpoint;
-      }
-
-      if (channelArn) {
-        // 2. Fetch the actual active stream key for this channel from AWS
-        const keysCmd = new ListStreamKeysCommand({ channelArn });
-        const keysRes = await client.send(keysCmd);
-        let streamKeyVal = "";
-
-        if (keysRes.streamKeys && keysRes.streamKeys.length > 0) {
-          const keySummary = keysRes.streamKeys[0];
-          // If we only have the summary ARN, we use it or query it, but ListStreamKeys returns summaries
-          // Let's grab the stream key value using GetStreamKey if needed, or use summary value if present
-          streamKeyVal = keySummary.arn || "";
-        }
-
-        // To get the actual secret stream key string value from AWS IVS:
-        if (keysRes.streamKeys && keysRes.streamKeys.length > 0) {
-          const { GetStreamKeyCommand } = await import("@aws-sdk/client-ivs");
-          const getKeyDetail = await client.send(new GetStreamKeyCommand({ arn: keysRes.streamKeys[0].arn }));
-          streamKeyVal = getKeyDetail.streamKey?.value || "";
-        }
-
-        if (playbackUrl && streamKeyVal) {
-          console.log("[AWS IVS] Successfully synced live channel credentials from AWS.");
-          return {
-            playbackUrl,
-            streamKey: streamKeyVal,
-            ingestEndpoint: `rtmps://${ingestEndpoint.replace(/^rtmps?:\/\//, "").replace(/\/app\/?$/, "")}/app/`,
-            arn: channelArn,
-          };
-        }
+      if (playbackUrl && streamKeyVal) {
+        console.log("[AWS IVS] Successfully generated real live AWS credentials!");
+        return {
+          playbackUrl,
+          streamKey: streamKeyVal,
+          ingestEndpoint: `rtmps://${ingestEndpoint.replace(/^rtmps?:\/\//, "").replace(/\/app\/?$/, "")}/app/`,
+          arn: channelArn,
+        };
       }
     } catch (e: any) {
-      console.warn("[AWS IVS API Error]:", e.message || e);
+      console.error("[AWS IVS Direct Creation Error]:", e.message || e);
     }
   }
 
-  // Fallback simulator if AWS call fails
-  const hash = crypto.createHash("md5").update(username).digest("hex");
-  return {
-    playbackUrl: `https://${hash.substring(0, 12)}.eu-west-1.playback.live-video.net/api/video/v1/eu-west-1.123456789012.channel.${hash.substring(12, 24)}.m3u8`,
-    streamKey: `sk_eu-west-1_${username}_fallbackkey`,
-    ingestEndpoint: "rtmps://global-contribute.live-video.net:443/app/",
-    arn: `arn:aws:ivs:eu-west-1:123456789012:channel/${username}`,
-  };
+  throw new Error("Failed to communicate with AWS IVS to generate real keys.");
 }
 
 const uploadsDir = path.join(process.cwd(), "uploads");
@@ -257,7 +216,7 @@ async function getOrCreateChannelForUser(uid: string, username: string, forceNew
     };
   }
 
-  const ivsData = await getOrCreateIvsChannelDetails(username);
+  const ivsData = await createDirectIvsChannel(username);
   const newChan: ChannelDoc = {
     channel_id: uid,
     user_uid: uid,
