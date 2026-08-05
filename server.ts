@@ -10,13 +10,26 @@ import bcrypt from "bcryptjs";
 import multer from "multer";
 import { WebSocketServer, WebSocket } from "ws";
 import { createServer as createViteServer } from "vite";
-import admin from "firebase-admin";
+import * as firebaseAdmin from "firebase-admin";
 
 import { IvsClient, CreateChannelCommand } from "@aws-sdk/client-ivs";
+
+const admin: any = (firebaseAdmin as any).default || firebaseAdmin;
 
 dotenv.config();
 
 console.log("SPARKZ.TV - Server booting up with latest deployment environment parameters.");
+
+// Safe Firestore database accessor helper to prevent type/binding crashes
+function getDbFs() {
+  if (admin && typeof admin.firestore === "function") {
+    return admin.firestore();
+  }
+  if (admin && admin.default && typeof admin.default.firestore === "function") {
+    return admin.default.firestore();
+  }
+  throw new Error("Firebase Admin firestore method is unavailable.");
+}
 
 let ivsClient: IvsClient | null = null;
 function getIvsClient() {
@@ -98,7 +111,7 @@ try {
   console.error("Error reading firebase-applet-config.json:", e);
 }
 
-firebaseConfig.projectId = firebaseConfig.projectId || process.env.FIREBASE_PROJECT_ID || process.env.GCP_PROJECT || "ai-studio-sparksztv22-93d657ea-0def-4bee-a52e-2b85b2f712b1";
+firebaseConfig.projectId = firebaseConfig.projectId || process.env.FIREBASE_PROJECT_ID || process.env.GCP_PROJECT || "ai-studio-applet-webapp-400d5";
 firebaseConfig.apiKey = firebaseConfig.apiKey || process.env.FIREBASE_API_KEY;
 firebaseConfig.firestoreDatabaseId = firebaseConfig.firestoreDatabaseId || process.env.FIREBASE_DATABASE_ID || "(default)";
 
@@ -109,16 +122,18 @@ if (!firebaseConfig.projectId) {
 }
 
 try {
-  if (admin && admin.apps && Array.isArray(admin.apps) && admin.apps.length === 0) {
+  const apps = admin.apps || (admin.default && admin.default.apps);
+  if (apps && Array.isArray(apps) && apps.length === 0) {
     const bucketName = firebaseConfig.storageBucket || `${firebaseConfig.projectId}.firebasestorage.app`;
-    admin.initializeApp({
+    const initApp = admin.initializeApp || (admin.default && admin.default.initializeApp);
+    initApp({
       projectId: firebaseConfig.projectId,
       storageBucket: bucketName,
     });
-    console.log(`Firebase Admin SDK initialized successfully for project: "${firebaseConfig.projectId}" with storageBucket: "${bucketName}"`);
+    console.log(`Firebase Admin SDK initialized successfully for project: "${firebaseConfig.projectId}"`);
   }
 } catch (e) {
-  console.error("Failed to initialize Firebase Admin SDK (continuing with REST API fallback):", e);
+  console.error("Failed to initialize Firebase Admin SDK:", e);
 }
 
 const uploadsDir = path.join(process.cwd(), "uploads");
@@ -171,31 +186,27 @@ function saveBase64File(base64Str: string, originalFilename: string): string {
 
 async function syncChannelToFirestore(c: ChannelDoc) {
   if (!c) return;
-
-  if (admin && admin.apps && admin.apps.length) {
-    try {
-      const dbFs = admin.firestore();
-      const uid = c.user_uid || c.channel_id;
-      if (uid && uid !== "undefined" && uid !== "null") {
-        const strictChannelDoc = {
-          uid: uid,
-          username: c.username || "",
-          livepeer_stream_id: c.livepeer_stream_id || "",
-          stream_key: c.stream_key || "",
-          playback_id: c.playback_id || "",
-          playback_url: c.playback_url || c.playback_id || "",
-          playbackUrl: c.playbackUrl || c.playback_id || "",
-          streamKey: c.streamKey || c.stream_key || "",
-          rtmp_url: c.rtmp_url || "rtmps://global-ingest.live-video.net:443/app/",
-          rtmpUrl: c.rtmpUrl || "rtmps://global-ingest.live-video.net:443/app/",
-          updated_at: new Date()
-        };
-        await dbFs.collection("channels").doc(uid).set(strictChannelDoc, { merge: true });
-        console.log(`[syncChannelToFirestore] Strictly synchronized channels document for user UID: ${uid}`);
-      }
-    } catch (err) {
-      console.error("[syncChannelToFirestore] Error syncing strict channels document:", err);
+  try {
+    const dbFs = getDbFs();
+    const uid = c.user_uid || c.channel_id;
+    if (uid && uid !== "undefined" && uid !== "null") {
+      const strictChannelDoc = {
+        uid: uid,
+        username: c.username || "",
+        livepeer_stream_id: c.livepeer_stream_id || "",
+        stream_key: c.stream_key || "",
+        playback_id: c.playback_id || "",
+        playback_url: c.playback_url || c.playback_id || "",
+        playbackUrl: c.playbackUrl || c.playback_id || "",
+        streamKey: c.streamKey || c.stream_key || "",
+        rtmp_url: c.rtmp_url || "rtmps://global-ingest.live-video.net:443/app/",
+        rtmpUrl: c.rtmpUrl || "rtmps://global-ingest.live-video.net:443/app/",
+        updated_at: new Date()
+      };
+      await dbFs.collection("channels").doc(uid).set(strictChannelDoc, { merge: true });
     }
+  } catch (err) {
+    console.error("[syncChannelToFirestore] Error syncing document:", err);
   }
 }
 
@@ -216,199 +227,106 @@ async function updateFirestoreChannelLiveStatus(
     updateFields.playbackId = playbackId;
   }
 
-  if (admin && admin.apps && admin.apps.length) {
+  try {
+    const dbFs = getDbFs();
+    const docRef = dbFs.collection("channels").doc(docId);
     try {
-      const dbFs = admin.firestore();
-      const docRef = dbFs.collection("channels").doc(docId);
-      try {
-        await docRef.update(updateFields);
-      } catch {
-        await docRef.set(updateFields, { merge: true });
-      }
-
-      if (docId === "nsU1v44XFnN3FloJvNePqj6cBG2" || docId === "djsparkz") {
-        const otherId = docId === "djsparkz" ? "nsU1v44XFnN3FloJvNePqj6cBG2" : "djsparkz";
-        const otherRef = dbFs.collection("channels").doc(otherId);
-        try {
-          await otherRef.update(updateFields);
-        } catch {
-          await otherRef.set(updateFields, { merge: true });
-        }
-      }
-    } catch (adminErr) {}
-  }
-}
-
-async function checkLivepeerStreamIsLive(streamId: string): Promise<boolean> {
-  const targetArn = streamId.startsWith("arn:aws:ivs:") 
-    ? streamId 
-    : "";
-  
-  if (!targetArn) return false;
-
-  const client = getIvsClient();
-  if (client) {
-    try {
-      const { GetStreamCommand } = await import("@aws-sdk/client-ivs");
-      const response = await client.send(new GetStreamCommand({ channelArn: targetArn }));
-      return !!response.stream;
-    } catch (ivsErr: any) {
-      console.log(`[AWS IVS checkLivepeerStreamIsLive] offline/error for ${targetArn}: ${ivsErr.name || ivsErr.message}`);
-      return false;
+      await docRef.update(updateFields);
+    } catch {
+      await docRef.set(updateFields, { merge: true });
     }
-  }
-  return false;
+  } catch (err) {}
 }
 
 async function purgeInvalidFirestoreDocuments() {
-  if (admin && admin.apps && admin.apps.length) {
-    try {
-      const dbFs = admin.firestore();
-      console.log("[Firestore Sync] Running routine: query and clean up 'channels' collection...");
-      const snap = await dbFs.collection("channels").get();
-      const deletions: Promise<any>[] = [];
+  try {
+    const dbFs = getDbFs();
+    const snap = await dbFs.collection("channels").get();
+    const deletions: Promise<any>[] = [];
 
-      snap.forEach((doc) => {
-        const docId = doc.id;
-        const data = doc.data() || {};
-        const playbackId = data.playback_id || data.playbackId || "";
+    snap.forEach((doc) => {
+      const docId = doc.id;
+      const data = doc.data() || {};
+      const playbackId = data.playback_id || data.playbackId || "";
+      const isUndefinedId = docId === "undefined" || docId === "null" || !docId;
+      const isOmitEmpty = !playbackId || playbackId === "undefined" || playbackId === "null";
 
-        const isUndefinedId = (
-          docId === "undefined" ||
-          docId === "null" ||
-          !docId ||
-          docId.toLowerCase() === "undefined" ||
-          docId.toLowerCase() === "null"
-        );
-
-        const isOmitEmpty = !playbackId || playbackId === "undefined" || playbackId === "null";
-
-        if (isUndefinedId || isOmitEmpty) {
-          console.log(`[Firestore Sync] Deleting invalid/stale document: docId="${docId}", playback_id="${playbackId}"`);
-          deletions.push(dbFs.collection("channels").doc(docId).delete());
-        }
-      });
-
-      if (deletions.length > 0) {
-        await Promise.all(deletions);
-        console.log(`[Firestore Sync] Completed purging ${deletions.length} invalid/stale channels documents.`);
+      if (isUndefinedId || isOmitEmpty) {
+        deletions.push(dbFs.collection("channels").doc(docId).delete());
       }
-    } catch (err) {
-      console.error("[Firestore Sync] Error during channels collection purge:", err);
+    });
+
+    if (deletions.length > 0) {
+      await Promise.all(deletions);
     }
-  }
+  } catch (err) {}
 }
 
 async function enforceSingleSourceOfTruth() {
-  if (admin && admin.apps && admin.apps.length) {
-    try {
-      const dbFs = admin.firestore();
-      console.log("[Firestore Sync] Enforcing single source of truth for core channel 'djsparkz'...");
+  try {
+    const djsparkzChannel: ChannelDoc = {
+      channel_id: "nsU1v44XFnN3FloJvNePqj6cBG2",
+      user_uid: "nsU1v44XFnN3FloJvNePqj6cBG2",
+      username: "djsparkz",
+      display_name: "djsparkz",
+      photo_url: null,
+      thumbnail_url: null,
+      livepeer_stream_id: "",
+      stream_key: "",
+      playback_id: "",
+      playback_url: "",
+      playbackUrl: "",
+      streamKey: "",
+      rtmp_url: "rtmps://global-ingest.live-video.net:443/app/",
+      rtmpUrl: "rtmps://global-ingest.live-video.net:443/app/",
+      stream_title: "djsparkz's Live Stream",
+      category: "music",
+      is_live: false,
+      viewer_count: 0,
+      record_enabled: true,
+      last_updated: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+      schedule: [],
+    };
 
-      const djsparkzChannel: ChannelDoc = {
-        channel_id: "nsU1v44XFnN3FloJvNePqj6cBG2",
-        user_uid: "nsU1v44XFnN3FloJvNePqj6cBG2",
-        username: "djsparkz",
-        display_name: "djsparkz",
-        photo_url: null,
-        thumbnail_url: null,
-        livepeer_stream_id: "",
-        stream_key: "",
-        playback_id: "",
-        playback_url: "",
-        playbackUrl: "",
-        streamKey: "",
-        rtmp_url: "rtmps://global-ingest.live-video.net:443/app/",
-        rtmpUrl: "rtmps://global-ingest.live-video.net:443/app/",
-        stream_title: "djsparkz's Live Stream",
-        category: "music",
-        is_live: false,
-        viewer_count: 0,
-        record_enabled: true,
-        last_updated: new Date().toISOString(),
-        created_at: new Date().toISOString(),
-        schedule: [],
-      };
-
-      db.channels.set(djsparkzChannel.channel_id, djsparkzChannel);
-      await syncChannelToFirestore(djsparkzChannel);
-      console.log("[Firestore Sync] Core channel 'djsparkz' initialized successfully.");
-    } catch (err) {
-      console.error("[Firestore Sync] Error enforcing single source of truth on startup:", err);
-    }
-  }
+    db.channels.set(djsparkzChannel.channel_id, djsparkzChannel);
+    await syncChannelToFirestore(djsparkzChannel);
+  } catch (err) {}
 }
 
 async function restoreChannelsFromFirestore() {
-  if (admin && admin.apps && admin.apps.length) {
-    try {
-      const dbFs = admin.firestore();
-      const snap = await dbFs.collection("channels").get();
-      snap.forEach((doc) => {
-        const docId = doc.id;
-        const data = doc.data() as any;
-        if (!data) return;
+  try {
+    const dbFs = getDbFs();
+    const snap = await dbFs.collection("channels").get();
+    snap.forEach((doc) => {
+      const docId = doc.id;
+      const data = doc.data() as any;
+      if (!data) return;
+      if (docId === "undefined" || docId === "null") return;
 
-        const isUndefinedId = (
-          docId === "undefined" ||
-          docId === "null" ||
-          docId.toLowerCase() === "undefined" ||
-          docId.toLowerCase() === "null"
-        );
-        if (isUndefinedId) return;
-
-        if ((data.channel_id || data.user_uid) && data.username) {
-          const channelId = data.channel_id || data.user_uid;
-          if (channelId === "undefined" || channelId === "null" || data.username === "undefined" || data.username === "null") {
-            return;
-          }
-
-          const channelObj: ChannelDoc = {
-            channel_id: channelId,
-            user_uid: data.user_uid || channelId,
-            username: data.username,
-            display_name: data.display_name || data.username,
-            photo_url: data.photo_url || null,
-            thumbnail_url: data.thumbnail_url || null,
-            livepeer_stream_id: data.livepeer_stream_id || "",
-            stream_key: data.stream_key || "",
-            playback_id: data.playback_id || data.playbackUrl || "",
-            stream_title: data.stream_title || `${data.display_name || data.username}'s Live Stream`,
-            category: data.category || "music",
-            is_live: Boolean(data.is_live ?? data.isLive ?? false),
-            viewer_count: typeof data.viewer_count === "number" ? data.viewer_count : 0,
-            schedule: data.schedule || [],
-            last_updated: data.last_updated || new Date().toISOString(),
-          };
-          db.channels.set(channelId, channelObj);
-        }
-      });
-    } catch (e) {}
-  }
-}
-
-async function restoreEmotesFromFirestore() {
-  if (admin && admin.apps && admin.apps.length) {
-    try {
-      const dbFs = admin.firestore();
-      const snap = await dbFs.collection("emotes").get();
-      snap.forEach((doc) => {
-        const data = doc.data() as any;
-        if (data && data.id && data.channel_username) {
-          if (!db.emotes.some((item) => item.id === data.id)) {
-            db.emotes.push({
-              id: data.id,
-              channel_username: data.channel_username,
-              code: data.code || "",
-              name: data.name || "",
-              image_url: data.image_url || "",
-              created_at: data.created_at || new Date().toISOString(),
-            });
-          }
-        }
-      });
-    } catch (e) {}
-  }
+      if ((data.channel_id || data.user_uid) && data.username) {
+        const channelId = data.channel_id || data.user_uid;
+        const channelObj: ChannelDoc = {
+          channel_id: channelId,
+          user_uid: data.user_uid || channelId,
+          username: data.username,
+          display_name: data.display_name || data.username,
+          photo_url: data.photo_url || null,
+          thumbnail_url: data.thumbnail_url || null,
+          livepeer_stream_id: data.livepeer_stream_id || "",
+          stream_key: data.stream_key || "",
+          playback_id: data.playback_id || data.playbackUrl || "",
+          stream_title: data.stream_title || `${data.display_name || data.username}'s Live Stream`,
+          category: data.category || "music",
+          is_live: Boolean(data.is_live ?? data.isLive ?? false),
+          viewer_count: typeof data.viewer_count === "number" ? data.viewer_count : 0,
+          schedule: data.schedule || [],
+          last_updated: data.last_updated || new Date().toISOString(),
+        };
+        db.channels.set(channelId, channelObj);
+      }
+    });
+  } catch (e) {}
 }
 
 const PORT = process.env.APPLET_ID ? 3000 : (process.env.PORT ? parseInt(process.env.PORT, 10) : 3000);
@@ -432,28 +350,6 @@ interface ScheduleItem {
   time: string;
   title: string;
   genre?: string;
-}
-
-interface StoryDoc {
-  id: string;
-  user_uid: string;
-  username: string;
-  display_name: string;
-  user_photo_url: string | null;
-  media_url: string;
-  media_type: "image" | "video";
-  caption: string;
-  created_at: string;
-  expires_at: string;
-}
-
-interface EmoteDoc {
-  id: string;
-  channel_username: string;
-  code: string;
-  name: string;
-  image_url: string;
-  created_at: string;
 }
 
 interface ChannelDoc {
@@ -483,84 +379,16 @@ interface ChannelDoc {
   rtmpUrl?: string;
 }
 
-interface FollowDoc {
-  follower_uid: string;
-  follower_username: string;
-  channel_username: string;
-  channel_user_uid: string;
-  created_at: string;
-}
-
-interface SubscriptionDoc {
-  subscriber_uid: string;
-  subscriber_username: string;
-  channel_username: string;
-  channel_user_uid: string;
-  tier: string;
-  created_at: string;
-}
-
-interface NotificationDoc {
-  id: string;
-  user_uid: string;
-  type: string;
-  channel_username?: string;
-  channel_display_name?: string;
-  channel_photo_url?: string;
-  stream_title?: string;
-  created_at: string;
-  read: boolean;
-}
-
-interface ChatMessageDoc {
-  id: string;
-  channel_username: string;
-  text: string;
-  sender_uid: string;
-  sender_username: string;
-  sender_display_name: string;
-  sender_photo_url: string | null;
-  created_at: string;
-  is_highlighted?: boolean;
-  highlight_type?: string;
-  sender_badges?: string[];
-  sender_color?: string;
-}
-
-interface ViewerSessionDoc {
-  channel_username: string;
-  viewer_id: string;
-  last_seen: number;
-}
-
-interface RecordingSessionDoc {
-  session_id: string;
-  channel_username: string;
-  playback_id: string;
-  playback_url: string;
-  recording_url: string;
-  recording_status: string;
-  duration_sec: number;
-  created_at: string;
-}
-
-interface FileDoc {
-  data: Buffer;
-  mimeType: string;
-}
-
 class InMemStore {
   users: Map<string, UserDoc> = new Map();
   channels: Map<string, ChannelDoc> = new Map();
-  follows: FollowDoc[] = [];
-  subscriptions: SubscriptionDoc[] = [];
-  notifications: NotificationDoc[] = [];
-  chatMessages: ChatMessageDoc[] = [];
-  emotes: EmoteDoc[] = [];
-  stories: StoryDoc[] = [];
-  viewerSessions: ViewerSessionDoc[] = [];
-  sessions: RecordingSessionDoc[] = [];
-  files: Map<string, FileDoc> = new Map();
+  chatMessages: any[] = [];
+  emotes: any[] = [];
+  stories: any[] = [];
+  follows: any[] = [];
+  subscriptions: any[] = [];
+  notifications: any[] = [];
+  sessions: any[] = [];
 
   constructor() {
     this.seedDefaults();
@@ -606,33 +434,15 @@ class InMemStore {
 
     this.users.set(djsparkzUser.uid, djsparkzUser);
     this.channels.set(djsparkzChannel.channel_id, djsparkzChannel);
-
-    setTimeout(() => {
-      syncChannelToFirestore(djsparkzChannel).catch(() => {});
-    }, 1000);
   }
 }
 
 const db = new InMemStore();
 
-function channelPublic(
-  c: ChannelDoc,
-  opts: {
-    include_stream_key?: boolean;
-    follower_count?: number;
-    is_following?: boolean;
-    subscriber_count?: number;
-    is_subscribed?: boolean;
-    viewer_count_override?: number;
-  } = {}
-) {
-  if (!c || c.channel_id === "undefined" || c.channel_id === "null" || c.username === "undefined" || c.username === "null") {
-    return {};
-  }
-
-  let isLive = Boolean(c.is_live);
-  let playbackId = c.playback_id || "";
-  let playbackUrl = playbackId.startsWith("http") ? playbackId : (playbackId ? `https://lvpr.tv/?v=${playbackId}` : "");
+function channelPublic(c: ChannelDoc, opts: { include_stream_key?: boolean } = {}) {
+  if (!c || c.channel_id === "undefined" || c.username === "undefined") return {};
+  const playbackId = c.playback_id || "";
+  const playbackUrl = playbackId.startsWith("http") ? playbackId : (playbackId ? `https://lvpr.tv/?v=${playbackId}` : "");
 
   const out: Record<string, any> = {
     channel_id: c.channel_id,
@@ -647,20 +457,11 @@ function channelPublic(
     playbackUrl: playbackUrl,
     stream_title: c.stream_title || "",
     category: c.category || "music",
-    is_live: isLive,
-    isLive: isLive,
-    viewer_count: opts.viewer_count_override !== undefined ? opts.viewer_count_override : c.viewer_count,
+    is_live: Boolean(c.is_live),
+    isLive: Boolean(c.is_live),
+    viewer_count: c.viewer_count || 0,
     last_updated: c.last_updated,
-    stream_started_at: c.stream_started_at,
-    stream_ended_at: c.stream_ended_at,
-    record_enabled: c.record_enabled ?? true,
-    schedule: c.schedule || [],
   };
-
-  if (opts.follower_count !== undefined) out.follower_count = opts.follower_count;
-  if (opts.is_following !== undefined) out.is_following = opts.is_following;
-  if (opts.subscriber_count !== undefined) out.subscriber_count = opts.subscriber_count;
-  if (opts.is_subscribed !== undefined) out.is_subscribed = opts.is_subscribed;
 
   if (opts.include_stream_key) {
     out.stream_key = c.stream_key || "";
@@ -669,17 +470,12 @@ function channelPublic(
     out.rtmpUrl = c.rtmpUrl || "rtmps://global-ingest.live-video.net:443/app/";
     out.livepeer_stream_id = c.livepeer_stream_id || "";
   }
-
   return out;
 }
 
 async function findUserByToken(token: string | null): Promise<UserDoc | null> {
   if (!token || token === "guest" || token === "null" || token === "undefined") return null;
-
   let uid: string | null = null;
-  let emailFromToken: string | null = null;
-  let nameFromToken: string | null = null;
-
   try {
     const payload = jwt.verify(token, JWT_SECRET) as any;
     if (payload && payload.sub) uid = payload.sub;
@@ -688,22 +484,15 @@ async function findUserByToken(token: string | null): Promise<UserDoc | null> {
       const decoded = jwt.decode(token) as any;
       if (decoded && (decoded.sub || decoded.user_id || decoded.uid)) {
         uid = decoded.sub || decoded.user_id || decoded.uid;
-        emailFromToken = decoded.email || null;
-        nameFromToken = decoded.name || decoded.display_name || null;
       }
     } catch {}
   }
-
   if (!uid) return null;
-
-  let user = db.users.get(uid);
-  if (user) return user;
-
-  return {
+  return db.users.get(uid) || {
     uid,
-    email: emailFromToken || "",
-    username: emailFromToken ? emailFromToken.split("@")[0] : `user_${uid.slice(0, 6)}`,
-    display_name: nameFromToken || "User",
+    email: "",
+    username: `user_${uid.slice(0, 6)}`,
+    display_name: "User",
     photo_url: null,
     bio: "",
     password_hash: "",
@@ -718,35 +507,11 @@ async function authenticateToken(req: Request): Promise<UserDoc | null> {
   return findUserByToken(token);
 }
 
-async function getOrCreateChannelForUser(uid: string, username: string, forceNew = false): Promise<{
-  uid: string;
-  username: string;
-  livepeer_stream_id: string;
-  stream_key: string;
-  playback_id: string;
-  playback_url?: string;
-  playbackUrl?: string;
-  streamKey?: string;
-  rtmp_url?: string;
-  rtmpUrl?: string;
-  updated_at: Date;
-}> {
+async function getOrCreateChannelForUser(uid: string, username: string, forceNew = false) {
   if (!uid) throw new Error("UID is required");
-
-  let dbFs;
-  try {
-    dbFs = admin.firestore();
-  } catch (fsInitErr: any) {
-    throw new Error(`Firebase Firestore Initialization Failed: ${fsInitErr.message || fsInitErr}`);
-  }
-
-  let docRef = dbFs.collection("channels").doc(uid);
-  let docSnap;
-  try {
-    docSnap = await docRef.get();
-  } catch (dbGetErr: any) {
-    throw new Error(`Firestore Database Read Failed for UID "${uid}": ${dbGetErr.message || dbGetErr}`);
-  }
+  const dbFs = getDbFs();
+  const docRef = dbFs.collection("channels").doc(uid);
+  const docSnap = await docRef.get();
 
   if (docSnap.exists && !forceNew) {
     const data = docSnap.data() || {};
@@ -756,7 +521,6 @@ async function getOrCreateChannelForUser(uid: string, username: string, forceNew
     let rtmpUrl = data.rtmp_url || data.rtmpUrl || "rtmps://global-ingest.live-video.net:443/app/";
 
     if (!playbackId || !streamKey || forceNew) {
-      console.log(`[AWS IVS] Provisioning Amazon IVS channel for ${username}...`);
       const ivsData = await createIvsChannel(username);
       streamId = ivsData.arn;
       streamKey = ivsData.streamKey;
@@ -779,22 +543,20 @@ async function getOrCreateChannelForUser(uid: string, username: string, forceNew
     }
 
     return {
-      uid: data.uid || uid,
-      username: data.username || username,
+      uid,
+      username,
       livepeer_stream_id: streamId,
       stream_key: streamKey,
       playback_id: playbackId,
       playback_url: playbackId,
       playbackUrl: playbackId,
-      streamKey: streamKey,
+      streamKey,
       rtmp_url: rtmpUrl,
-      rtmpUrl: rtmpUrl,
+      rtmpUrl,
       updated_at: new Date()
     };
   } else {
-    console.log(`[AWS IVS Create] Provisioning new Amazon IVS channel for user: ${username} (UID: ${uid})`);
     const ivsData = await createIvsChannel(username);
-
     const newDoc = {
       uid,
       username,
@@ -808,33 +570,13 @@ async function getOrCreateChannelForUser(uid: string, username: string, forceNew
       rtmpUrl: ivsData.ingestEndpoint,
       updated_at: new Date()
     };
-
     await docRef.set(newDoc, { merge: true });
-    return {
-      ...newDoc,
-      updated_at: new Date()
-    };
+    return { ...newDoc, updated_at: new Date() };
   }
-}
-
-async function getOrResolveChannelPlaybackId(channel: ChannelDoc): Promise<ChannelDoc> {
-  const resolved = await getOrCreateChannelForUser(channel.user_uid || channel.channel_id, channel.username);
-  channel.livepeer_stream_id = resolved.livepeer_stream_id;
-  channel.stream_key = resolved.stream_key;
-  channel.playback_id = resolved.playback_id;
-  channel.playback_url = resolved.playback_url;
-  channel.playbackUrl = resolved.playbackUrl;
-  channel.streamKey = resolved.streamKey;
-  channel.rtmp_url = resolved.rtmp_url;
-  channel.rtmpUrl = resolved.rtmpUrl;
-  channel.last_updated = resolved.updated_at.toISOString();
-  db.channels.set(channel.channel_id, channel);
-  return channel;
 }
 
 async function getOrRestoreUserChannel(user: UserDoc): Promise<ChannelDoc> {
   const resolved = await getOrCreateChannelForUser(user.uid, user.username);
-
   const chan: ChannelDoc = {
     channel_id: user.uid,
     user_uid: user.uid,
@@ -859,7 +601,6 @@ async function getOrRestoreUserChannel(user: UserDoc): Promise<ChannelDoc> {
     created_at: new Date().toISOString(),
     schedule: [],
   };
-
   db.channels.set(user.uid, chan);
   return chan;
 }
@@ -867,9 +608,7 @@ async function getOrRestoreUserChannel(user: UserDoc): Promise<ChannelDoc> {
 async function requireAuth(req: Request, res: Response, next: NextFunction) {
   try {
     const user = await authenticateToken(req);
-    if (!user) {
-      return res.status(401).json({ error: "Not authenticated" });
-    }
+    if (!user) return res.status(401).json({ error: "Not authenticated" });
     (req as any).user = user;
     next();
   } catch (e) {
@@ -888,98 +627,18 @@ async function startServer() {
     await purgeInvalidFirestoreDocuments();
     await enforceSingleSourceOfTruth();
   } catch (err) {
-    console.error("Failed to run startup database cleanup and enforcement:", err);
+    console.error("Startup routine error:", err);
   }
 
   restoreChannelsFromFirestore().catch(() => {});
-  restoreEmotesFromFirestore().catch(() => {});
 
-  const handleIvsWebhook = async (req: any, res: any) => {
-    try {
-      const event = req.body;
-      console.log("Amazon IVS Webhook Event Received:", JSON.stringify(event));
+  const api = express.Router();
 
-      let action: "start" | "end" | null = null;
-      let channelArn = "";
-      let streamId = "";
-
-      if (event && event["detail-type"] === "IVS Channel State Change") {
-        const detail = event.detail || {};
-        const eventName = detail["event_name"];
-        channelArn = detail["channel_arn"] || "";
-        streamId = detail["stream_id"] || "";
-        if (eventName === "Session Started") {
-          action = "start";
-        } else if (eventName === "Session Ended") {
-          action = "end";
-        }
-      }
-
-      if (action && (channelArn || streamId)) {
-        const timestamp = new Date().toISOString();
-        for (const [id, channel] of db.channels.entries()) {
-          const isMatch = 
-            channel.livepeer_stream_id === channelArn || 
-            channel.livepeer_stream_id === streamId ||
-            channel.playback_id === channelArn ||
-            channel.playback_id === streamId;
-
-          if (isMatch) {
-            channel.is_live = action === "start";
-            if (action === "start") {
-              channel.stream_started_at = timestamp;
-            } else {
-              channel.stream_ended_at = timestamp;
-            }
-            channel.last_updated = timestamp;
-            db.channels.set(id, channel);
-            await updateFirestoreChannelLiveStatus(id, action === "start", timestamp);
-          }
-        }
-      }
-
-      return res.status(200).json({ received: true });
-    } catch (err) {
-      console.error("IVS Webhook processing error:", err);
-      return res.status(200).json({ received: false });
-    }
-  };
-
-  app.post("/api/livepeer/webhook", handleIvsWebhook);
-  app.post("/api/ivs/webhook", handleIvsWebhook);
-
-  const handleIvsCheckStatus = async (req: any, res: any) => {
-    try {
-      const streamId = req.body.streamId || req.body.stream_id || req.body.channel_id || req.body.username;
-      let targetStreamId = streamId || "";
-
-      const client = getIvsClient();
-      if (client && targetStreamId && targetStreamId.startsWith("arn:aws:ivs:")) {
-        try {
-          const { GetStreamCommand } = await import("@aws-sdk/client-ivs");
-          const response = await client.send(new GetStreamCommand({ channelArn: targetStreamId }));
-          const isLive = !!response.stream;
-          return res.json({ isActive: isLive, isLive: isLive, is_live: isLive, stream: response.stream });
-        } catch (ivsErr: any) {
-          return res.json({ isActive: false, isLive: false, is_live: false });
-        }
-      }
-
-      return res.json({ isActive: false, isLive: false, is_live: false });
-    } catch (e) {
-      return res.status(200).json({ isActive: false, isLive: false, is_live: false });
-    }
-  };
-
-  app.post("/api/livepeer/check-status", handleIvsCheckStatus);
-  app.post("/api/ivs/check-status", handleIvsCheckStatus);
-
-  app.get("/api/channels/mine", requireAuth, async (req, res) => {
+  api.get("/channels/mine", requireAuth, async (req, res) => {
     try {
       const user = (req as any).user as UserDoc;
       const channel = await getOrCreateChannelForUser(user.uid, user.username);
       const myChannel = await getOrRestoreUserChannel(user);
-
       const publicData = channelPublic(myChannel, { include_stream_key: true });
 
       return res.json({
@@ -995,99 +654,6 @@ async function startServer() {
     } catch (err: any) {
       console.error("[GET /api/channels/mine] Error:", err);
       return res.status(500).json({ error: "Failed to fetch channel", details: err.message });
-    }
-  });
-
-  async function resolveChannelByIdentifier(req: Request, paramValue?: string): Promise<ChannelDoc> {
-    const mapToChannelDoc = (data: any, identifier: string): ChannelDoc => {
-      const uid = data.uid || data.channel_id || identifier;
-      const username = data.username || identifier;
-      return {
-        channel_id: uid,
-        user_uid: uid,
-        username: username,
-        display_name: data.display_name || username,
-        photo_url: data.photo_url || null,
-        thumbnail_url: data.thumbnail_url || null,
-        livepeer_stream_id: data.livepeer_stream_id || "",
-        stream_key: data.stream_key || "",
-        playback_id: data.playback_id || data.playbackUrl || "",
-        playback_url: data.playback_url || data.playback_id || "",
-        playbackUrl: data.playback_url || data.playback_id || "",
-        rtmp_url: data.rtmp_url || "rtmps://global-ingest.live-video.net:443/app/",
-        rtmpUrl: data.rtmp_url || "rtmps://global-ingest.live-video.net:443/app/",
-        streamKey: data.stream_key || "",
-        stream_title: data.stream_title || `${username}'s Live Stream`,
-        category: data.category || "music",
-        is_live: Boolean(data.is_live ?? false),
-        viewer_count: typeof data.viewer_count === "number" ? data.viewer_count : 0,
-        record_enabled: Boolean(data.record_enabled ?? true),
-        schedule: data.schedule || [],
-        last_updated: new Date().toISOString(),
-      };
-    };
-
-    if (paramValue && admin && admin.apps && admin.apps.length) {
-      try {
-        const dbFs = admin.firestore();
-        const docSnap = await dbFs.collection("channels").doc(paramValue).get();
-        if (docSnap.exists) {
-          return mapToChannelDoc(docSnap.data(), paramValue);
-        }
-      } catch (e) {}
-    }
-
-    const firstChan = Array.from(db.channels.values())[0];
-    if (firstChan) return firstChan;
-
-    return {
-      channel_id: "nsU1v44XFnN3FloJvNePqj6cBG2",
-      user_uid: "nsU1v44XFnN3FloJvNePqj6cBG2",
-      username: "djsparkz",
-      display_name: "djsparkz",
-      photo_url: null,
-      thumbnail_url: null,
-      livepeer_stream_id: "",
-      stream_key: "",
-      playback_id: "",
-      playback_url: "",
-      playbackUrl: "",
-      streamKey: "",
-      rtmp_url: "rtmps://global-ingest.live-video.net:443/app/",
-      rtmpUrl: "rtmps://global-ingest.live-video.net:443/app/",
-      stream_title: "djsparkz's Live Stream",
-      category: "music",
-      is_live: false,
-      viewer_count: 0,
-      record_enabled: true,
-      last_updated: new Date().toISOString(),
-      schedule: [],
-    };
-  }
-
-  const api = express.Router();
-
-  api.get("/geolocation", async (req, res) => {
-    return res.json({
-      ipAddress: "127.0.0.1",
-      countryCode: "GB",
-      countryName: "United Kingdom",
-      regionName: "London",
-      cityName: "London",
-      zipCode: "E17",
-      timeZone: "Europe/London",
-    });
-  });
-
-  api.get("/channels", async (req, res) => {
-    try {
-      const channelsList = [];
-      for (const c of db.channels.values()) {
-        channelsList.push(channelPublic(c));
-      }
-      return res.json(channelsList);
-    } catch (err: any) {
-      return res.status(500).json({ error: "Failed to list channels", message: err.message });
     }
   });
 
