@@ -17,7 +17,7 @@ import {
 
 dotenv.config();
 
-console.log("SPARKZ.TV - Server booting up with live AWS IVS sync and branding fix.");
+console.log("SPARKZ.TV - Server booting up with accurate live status check.");
 
 try {
   if (!admin.apps || admin.apps.length === 0) {
@@ -70,7 +70,6 @@ async function createDirectIvsChannel(username: string): Promise<{
       const ingestEndpoint = createRes.channel?.ingestEndpoint || "global-contribute.live-video.net";
 
       if (playbackUrl && streamKeyVal) {
-        console.log("[AWS IVS] Successfully generated real live AWS credentials!");
         return {
           playbackUrl,
           streamKey: streamKeyVal,
@@ -152,20 +151,17 @@ const db = new InMemStore();
 function channelPublic(c: ChannelDoc, opts: { include_stream_key?: boolean } = {}) {
   if (!c || c.channel_id === "undefined") return {};
   const playbackId = c.playback_id || "";
-  
-  // Force correct branding for your main account
-  const username = (c.user_uid === "nsU1v44XFnN3FloJvNePqj6cBG2" || c.username?.includes("nsU1")) ? "djsparkz" : (c.username || "djsparkz");
 
   const out: Record<string, any> = {
     channel_id: c.channel_id,
     user_uid: c.user_uid,
-    username: username,
-    display_name: username,
+    username: "djsparkz",
+    display_name: "djsparkz",
     photo_url: c.photo_url,
     thumbnail_url: c.thumbnail_url,
     playback_id: playbackId,
     playbackUrl: playbackId,
-    stream_title: c.stream_title || "Live DJ Set",
+    stream_title: c.stream_title || "djsparkz Live Stream",
     category: c.category || "music",
     is_live: Boolean(c.is_live),
     isLive: Boolean(c.is_live),
@@ -204,10 +200,11 @@ async function authenticateToken(req: Request): Promise<UserDoc | null> {
 
 async function getOrCreateChannelForUser(uid: string, username: string, forceNew = false) {
   if (!uid) uid = "nsU1v44XFnN3FloJvNePqj6cBG2";
-  if (!username) username = "djsparkz";
 
   let existing = db.channels.get(uid);
   if (existing && !forceNew && existing.stream_key && !existing.stream_key.includes("fallback")) {
+    existing.username = "djsparkz";
+    existing.display_name = "djsparkz";
     return {
       uid,
       username: "djsparkz",
@@ -231,7 +228,7 @@ async function getOrCreateChannelForUser(uid: string, username: string, forceNew
     playback_id: ivsData.playbackUrl,
     stream_title: "djsparkz's Live Stream",
     category: "music",
-    is_live: true,
+    is_live: false, // Default to false until OBS actively streams
     viewer_count: 0,
     record_enabled: true,
     last_updated: new Date().toISOString(),
@@ -249,11 +246,6 @@ async function getOrCreateChannelForUser(uid: string, username: string, forceNew
   };
 }
 
-async function getOrRestoreUserChannel(user: UserDoc): Promise<ChannelDoc> {
-  await getOrCreateChannelForUser(user.uid, "djsparkz");
-  return db.channels.get(user.uid)!;
-}
-
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 10000;
 const JWT_SECRET = process.env.JWT_SECRET || "sparkz_secret_key_12345";
 
@@ -268,7 +260,7 @@ async function startServer() {
     try {
       const user = (await authenticateToken(req)) || db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2")!;
       const channel = await getOrCreateChannelForUser(user.uid, "djsparkz");
-      const myChannel = await getOrRestoreUserChannel(user);
+      const myChannel = db.channels.get(user.uid)!;
       const publicData = channelPublic(myChannel, { include_stream_key: true });
 
       return res.json({
@@ -282,7 +274,6 @@ async function startServer() {
         rtmp_url: channel.rtmp_url || "rtmps://global-contribute.live-video.net:443/app/",
       });
     } catch (err: any) {
-      console.error("[GET /api/channels/mine] Error:", err);
       return res.status(500).json({ error: "Failed to fetch channel", details: err.message });
     }
   });
@@ -292,11 +283,6 @@ async function startServer() {
       const channelsList: any[] = [];
       for (const [uid, chan] of db.channels.entries()) {
         channelsList.push(channelPublic(chan));
-      }
-      // Ensure djsparkz is always present in directory
-      if (channelsList.length === 0) {
-        const defaultChan = db.channels.get("nsU1v44XFnN3FloJvNePqj6cBG2");
-        if (defaultChan) channelsList.push(channelPublic(defaultChan));
       }
       return res.json(channelsList);
     } catch (err: any) {
@@ -319,7 +305,6 @@ async function startServer() {
         rtmp_url: channel.rtmp_url || "rtmps://global-contribute.live-video.net:443/app/",
       });
     } catch (err: any) {
-      console.error("[POST /api/stream/create] Error:", err);
       return res.status(500).json({ error: "Failed to create/get stream", details: err.message });
     }
   });
@@ -338,7 +323,6 @@ async function startServer() {
         rtmp_url: channel.rtmp_url || "rtmps://global-contribute.live-video.net:443/app/",
       });
     } catch (err: any) {
-      console.error("[POST /api/channels/generate-key] Error:", err);
       return res.status(500).json({ error: "Failed to regenerate stream key", details: err.message });
     }
   });
@@ -348,15 +332,21 @@ async function startServer() {
       const user = db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2");
       const chan = db.channels.get(user?.uid || "");
       const client = getIvsClient();
+      
       if (client && chan?.ivs_channel_arn) {
         const response = await client.send(new GetStreamCommand({ channelArn: chan.ivs_channel_arn }));
         const isLive = !!response.stream;
         chan.is_live = isLive;
         return res.json({ isActive: isLive, isLive, is_live: isLive, stream: response.stream });
       }
-      return res.json({ isActive: true, isLive: true, is_live: true });
+      
+      if (chan) chan.is_live = false;
+      return res.json({ isActive: false, isLive: false, is_live: false });
     } catch (e) {
-      return res.json({ isActive: true, isLive: true, is_live: true });
+      const user = db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2");
+      const chan = db.channels.get(user?.uid || "");
+      if (chan) chan.is_live = false;
+      return res.json({ isActive: false, isLive: false, is_live: false });
     }
   });
 
