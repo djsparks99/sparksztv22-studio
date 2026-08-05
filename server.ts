@@ -13,12 +13,14 @@ import admin from "firebase-admin";
 import { 
   IvsClient, 
   CreateChannelCommand, 
+  ListChannelsCommand,
+  GetStreamKeyCommand,
   GetStreamCommand 
 } from "@aws-sdk/client-ivs";
 
 dotenv.config();
 
-console.log("SPARKZ.TV - Server booting up with photo upload support & clean channel cache.");
+console.log("SPARKZ.TV - Server booting up with persistent stream keys.");
 
 try {
   if (!admin.apps || admin.apps.length === 0) {
@@ -46,18 +48,53 @@ function getIvsClient() {
   return ivsClient;
 }
 
-async function createDirectIvsChannel(username: string): Promise<{
+async function getOrCreatePersistentIvsChannel(username: string): Promise<{
   playbackUrl: string;
   streamKey: string;
   ingestEndpoint: string;
   arn: string;
 }> {
   const client = getIvsClient();
-  const safeName = `sparkz-${username}-${Date.now().toString().slice(-4)}`;
+  const safeName = `sparkz-${username}`;
 
   if (client) {
     try {
-      console.log(`[AWS IVS] Creating direct channel for "${safeName}"...`);
+      // 1. Check if a channel with this name already exists in AWS to prevent duplicates
+      const listCmd = new ListChannelsCommand({ filterByName: safeName });
+      const listRes = await client.send(listCmd);
+      
+      if (listRes.channels && listRes.channels.length > 0) {
+        const existingSummary = listRes.channels[0];
+        const arn = existingSummary.arn;
+        console.log(`[AWS IVS] Found existing persistent channel for "${username}": ${arn}`);
+        
+        // Fetch stream key for existing channel
+        const { ListStreamKeysCommand } = require("@aws-sdk/client-ivs");
+        const keysRes = await client.send(new ListStreamKeysCommand({ channelArn: arn }));
+        let streamKeyVal = "";
+        
+        if (keysRes.streamKeys && keysRes.streamKeys.length > 0) {
+          const { GetStreamKeyCommand } = require("@aws-sdk/client-ivs");
+          const keyDetail = await client.send(new GetStreamKeyCommand({ arn: keysRes.streamKeys[0].arn }));
+          streamKeyVal = keyDetail.streamKey?.value || "";
+        }
+
+        if (existingSummary.playbackUrl && streamKeyVal) {
+          return {
+            playbackUrl: existingSummary.playbackUrl,
+            streamKey: streamKeyVal,
+            ingestEndpoint: `rtmps://${(existingSummary.ingestEndpoint || "global-contribute.live-video.net").replace(/^rtmps?:\/\//, "").replace(/\/app\/?$/, "")}/app/`,
+            arn: arn!,
+          };
+        }
+      }
+    } catch (e: any) {
+      console.warn("[AWS IVS Lookup Warning]:", e.message || e);
+    }
+
+    // 2. If none exists, create it brand new once
+    try {
+      console.log(`[AWS IVS] Creating persistent channel for "${safeName}"...`);
       const createCmd = new CreateChannelCommand({
         name: safeName,
         latencyMode: "LOW",
@@ -79,11 +116,11 @@ async function createDirectIvsChannel(username: string): Promise<{
         };
       }
     } catch (e: any) {
-      console.error("[AWS IVS Direct Creation Error]:", e.message || e);
+      console.error("[AWS IVS Creation Error]:", e.message || e);
     }
   }
 
-  throw new Error("Failed to communicate with AWS IVS to generate real keys.");
+  throw new Error("Failed to communicate with AWS IVS.");
 }
 
 const uploadsDir = path.join(process.cwd(), "uploads");
@@ -91,10 +128,9 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-// Configure Multer for profile image uploads
 const upload = multer({
   dest: uploadsDir,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB file size limit
+  limits: { fileSize: 10 * 1024 * 1024 },
 });
 
 interface UserDoc {
@@ -222,7 +258,7 @@ async function getOrCreateChannelForUser(uid: string, username: string, forceNew
     };
   }
 
-  const ivsData = await createDirectIvsChannel("djsparkz");
+  const ivsData = await getOrCreatePersistentIvsChannel("djsparkz");
   const newChan: ChannelDoc = {
     channel_id: uid,
     user_uid: uid,
@@ -263,9 +299,6 @@ app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 async function startServer() {
-  // Clear any stale legacy channel entries on boot
-  db.channels.clear();
-
   app.get("/api/channels/mine", async (req, res) => {
     try {
       const user = (await authenticateToken(req)) || db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2")!;
@@ -371,7 +404,6 @@ async function startServer() {
     });
   });
 
-  // Profile Photo Upload Endpoints (Supports file upload AND base64/URL JSON payload)
   const handlePhotoUpload = async (req: Request, res: Response) => {
     try {
       const user = (await authenticateToken(req)) || db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2")!;
