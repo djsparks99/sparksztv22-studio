@@ -342,12 +342,98 @@ async function startServer() {
 
   const api = express.Router();
   
+  api.get("/categories", (req, res) => {
+    return res.json([
+      "music",
+      "talk",
+      "gaming",
+      "art",
+      "outdoors",
+      "lounge",
+      "dj_mix",
+      "podcast",
+      "radio",
+      "vibes"
+    ]);
+  });
+
+  const handleUserUpdate = async (req: Request, res: Response) => {
+    try {
+      const user = db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2")!;
+      if (req.body?.display_name !== undefined) {
+        user.display_name = req.body.display_name;
+        const channel = await getMasterChannel();
+        channel.display_name = req.body.display_name;
+      }
+      if (req.body?.bio !== undefined) {
+        user.bio = req.body.bio;
+      }
+      return res.json({
+        ...user,
+        username: "djsparkz",
+        display_name: user.display_name || "djsparkz",
+        photo_url: user.photo_url,
+        photoUrl: user.photo_url,
+        avatar: user.photo_url,
+        avatar_url: user.photo_url,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: "Failed to update user profile", details: err.message });
+    }
+  };
+
+  api.patch("/users/me", handleUserUpdate);
+  api.put("/users/me", handleUserUpdate);
+  api.post("/users/me", handleUserUpdate);
+
+  const handleChannelUpdate = async (req: Request, res: Response) => {
+    try {
+      const channel = await getMasterChannel();
+      if (req.body?.stream_title !== undefined) {
+        channel.stream_title = req.body.stream_title;
+      }
+      if (req.body?.category !== undefined) {
+        const categories = ["music", "talk", "gaming", "art", "outdoors", "lounge", "dj_mix", "podcast", "radio", "vibes"];
+        if (!categories.includes(req.body.category)) {
+          return res.status(400).json({ error: "Invalid category. Must be one of: " + categories.join(", ") });
+        }
+        channel.category = req.body.category;
+      }
+      if (req.body?.schedule !== undefined) {
+        (channel as any).schedule = req.body.schedule;
+      }
+      if (req.body?.thumbnail_url !== undefined) {
+        channel.thumbnail_url = req.body.thumbnail_url;
+      }
+      
+      return res.json(channelPublic(channel, { include_stream_key: true }));
+    } catch (err: any) {
+      return res.status(500).json({ error: "Failed to update channel", details: err.message });
+    }
+  };
+
+  api.patch("/channels/mine", handleChannelUpdate);
+  api.put("/channels/mine", handleChannelUpdate);
+  api.post("/channels/mine", handleChannelUpdate);
+
+  api.post("/channels/mine/schedule", async (req, res) => {
+    try {
+      const channel = await getMasterChannel();
+      if (req.body?.schedule !== undefined) {
+        (channel as any).schedule = req.body.schedule;
+      }
+      return res.json({ success: true, schedule: (channel as any).schedule });
+    } catch (err: any) {
+      return res.status(500).json({ error: "Failed to update schedule" });
+    }
+  });
+
   api.get("/users/me", async (req, res) => {
     const user = db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2")!;
     return res.json({
       ...user,
       username: "djsparkz",
-      display_name: "djsparkz",
+      display_name: user.display_name || "djsparkz",
       photo_url: user.photo_url,
       photoUrl: user.photo_url,
       avatar: user.photo_url,
