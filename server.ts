@@ -18,22 +18,24 @@ dotenv.config();
 
 console.log("SPARKZ.TV - Server booting up with latest deployment environment parameters.");
 
-// Initialize Firebase Admin safely
+// Force reliable Firebase Admin initialization without crashing if credentials are absent
 try {
   if (!admin.apps.length) {
     admin.initializeApp({
-      projectId: process.env.FIREBASE_PROJECT_ID || process.env.GCP_PROJECT || "ai-studio-applet-webapp-400d5",
-      storageBucket: `${process.env.FIREBASE_PROJECT_ID || "ai-studio-applet-webapp-400d5"}.firebasestorage.app`,
+      projectId: process.env.FIREBASE_PROJECT_ID || "ai-studio-applet-webapp-400d5",
     });
-    console.log("[Firebase Admin] Initialized successfully.");
+    console.log("[Firebase Admin] Initialized successfully with Project ID.");
   }
-} catch (e) {
-  console.error("[Firebase Admin] Initialization warning:", e);
+} catch (e: any) {
+  console.warn("[Firebase Admin] Initialization warning, operating in standalone memory mode:", e.message);
 }
 
-// Reliable direct Firestore instance getter
 function getDbFs() {
-  return getFirestore();
+  try {
+    return getFirestore();
+  } catch (e) {
+    return null; // Return null safely so callers can fallback to in-memory store
+  }
 }
 
 let ivsClient: IvsClient | null = null;
@@ -240,41 +242,58 @@ async function getOrCreateChannelForUser(uid: string, username: string, forceNew
   if (!uid) uid = "nsU1v44XFnN3FloJvNePqj6cBG2";
   if (!username) username = "djsparkz";
 
-  const dbFs = getDbFs();
-  const docRef = dbFs.collection("channels").doc(uid);
-  const docSnap = await docRef.get();
+  try {
+    const dbFs = getDbFs();
+    if (dbFs) {
+      const docRef = dbFs.collection("channels").doc(uid);
+      const docSnap = await docRef.get();
 
-  if (docSnap.exists && !forceNew) {
-    const data = docSnap.data() || {};
-    if (data.playback_id && data.stream_key) {
-      return {
+      if (docSnap.exists && !forceNew) {
+        const data = docSnap.data() || {};
+        if (data.playback_id && data.stream_key) {
+          return {
+            uid,
+            username,
+            livepeer_stream_id: data.livepeer_stream_id || "",
+            stream_key: data.stream_key || "",
+            playback_id: data.playback_id || "",
+            rtmp_url: data.rtmp_url || "rtmps://global-ingest.live-video.net:443/app/",
+            updated_at: new Date()
+          };
+        }
+      }
+
+      const ivsData = await createIvsChannel(username);
+      const newDoc = {
         uid,
         username,
-        livepeer_stream_id: data.livepeer_stream_id || "",
-        stream_key: data.stream_key || "",
-        playback_id: data.playback_id || "",
-        rtmp_url: data.rtmp_url || "rtmps://global-ingest.live-video.net:443/app/",
+        livepeer_stream_id: ivsData.arn,
+        stream_key: ivsData.streamKey,
+        playback_id: ivsData.playbackUrl,
+        playback_url: ivsData.playbackUrl,
+        playbackUrl: ivsData.playbackUrl,
+        streamKey: ivsData.streamKey,
+        rtmp_url: ivsData.ingestEndpoint,
+        rtmpUrl: ivsData.ingestEndpoint,
         updated_at: new Date()
       };
+      await docRef.set(newDoc, { merge: true });
+      return newDoc;
     }
+  } catch (dbErr) {
+    console.warn("Firestore unavailable, using in-memory channel fallback:", dbErr);
   }
 
   const ivsData = await createIvsChannel(username);
-  const newDoc = {
+  return {
     uid,
     username,
     livepeer_stream_id: ivsData.arn,
     stream_key: ivsData.streamKey,
     playback_id: ivsData.playbackUrl,
-    playback_url: ivsData.playbackUrl,
-    playbackUrl: ivsData.playbackUrl,
-    streamKey: ivsData.streamKey,
     rtmp_url: ivsData.ingestEndpoint,
-    rtmpUrl: ivsData.ingestEndpoint,
     updated_at: new Date()
   };
-  await docRef.set(newDoc, { merge: true });
-  return newDoc;
 }
 
 async function getOrRestoreUserChannel(user: UserDoc): Promise<ChannelDoc> {
