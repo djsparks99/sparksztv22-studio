@@ -18,24 +18,25 @@ dotenv.config();
 
 console.log("SPARKZ.TV - Server booting up with latest deployment environment parameters.");
 
-// Force reliable Firebase Admin initialization without crashing if credentials are absent
+// Safe Firebase Admin initialization protecting against undefined apps array
 try {
-  if (!admin.apps.length) {
+  if (!admin.apps || admin.apps.length === 0) {
     admin.initializeApp({
       projectId: process.env.FIREBASE_PROJECT_ID || "ai-studio-applet-webapp-400d5",
     });
-    console.log("[Firebase Admin] Initialized successfully with Project ID.");
+    console.log("[Firebase Admin] Initialized successfully.");
   }
 } catch (e: any) {
-  console.warn("[Firebase Admin] Initialization warning, operating in standalone memory mode:", e.message);
+  console.warn("[Firebase Admin] Initialization bypassed, running in standalone memory/IVS mode:", e.message);
 }
 
 function getDbFs() {
   try {
-    return getFirestore();
-  } catch (e) {
-    return null; // Return null safely so callers can fallback to in-memory store
-  }
+    if (admin.apps && admin.apps.length > 0) {
+      return getFirestore();
+    }
+  } catch (e) {}
+  return null;
 }
 
 let ivsClient: IvsClient | null = null;
@@ -281,7 +282,7 @@ async function getOrCreateChannelForUser(uid: string, username: string, forceNew
       return newDoc;
     }
   } catch (dbErr) {
-    console.warn("Firestore unavailable, using in-memory channel fallback:", dbErr);
+    console.warn("Firestore access skipped, using local channel fallback:", dbErr);
   }
 
   const ivsData = await createIvsChannel(username);
