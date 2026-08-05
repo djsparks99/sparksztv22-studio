@@ -50,6 +50,8 @@ export default function Channel() {
   }, [username]);
 
   useEffect(() => {
+    setChannel(null);
+    setNotFound(false);
     let cancelled = false;
 
     // First fetch via API
@@ -92,11 +94,37 @@ export default function Channel() {
             const finalSchedule = Array.isArray(fsSchedule)
               ? fsSchedule
               : (Array.isArray(prev?.schedule) ? prev.schedule : []);
-            return {
-              ...prev,
-              ...fsData,
-              schedule: finalSchedule,
-            };
+            
+            if (!prev) {
+              return {
+                ...fsData,
+                schedule: finalSchedule,
+              };
+            }
+
+            const merged = { ...prev };
+            const realTimeFields = [
+              "is_live",
+              "viewer_count",
+              "stream_title",
+              "category",
+              "stream_started_at",
+              "playback_id",
+              "livepeer_stream_id",
+              "playbackUrl",
+              "playback_url"
+            ];
+
+            for (const key of Object.keys(fsData)) {
+              if (realTimeFields.includes(key)) {
+                merged[key] = fsData[key];
+              } else if (fsData[key] !== null && fsData[key] !== undefined) {
+                merged[key] = fsData[key];
+              }
+            }
+
+            merged.schedule = finalSchedule;
+            return merged;
           });
         }
       },
