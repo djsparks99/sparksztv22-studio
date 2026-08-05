@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-export default function StoriesSection() {
+export default function StoriesSection({ sidebar = false, collapsed = false }) {
   const { user } = useAuth();
   const [stories, setStories] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -71,6 +71,259 @@ export default function StoriesSection() {
       toast.error(apiErrorMessage(err) || "Failed to delete story");
     }
   };
+
+  if (sidebar) {
+    if (collapsed) {
+      // Collapsed sidebar vertical list of stories
+      return (
+        <div className="flex flex-col items-center py-4 gap-4 border-b border-[#27272a]/40" data-testid="stories-sidebar-collapsed">
+          {/* Compact Upload Story Trigger */}
+          <button
+            type="button"
+            data-testid="create-story-btn-collapsed"
+            onClick={() => {
+              if (!user) {
+                toast.error("Please log in to share a story");
+                return;
+              }
+              setShowCreateModal(true);
+            }}
+            className="group relative flex flex-col items-center justify-center cursor-pointer"
+            title="Post a 24-Hour Transmission"
+          >
+            <div className="relative flex h-9 w-9 items-center justify-center rounded-full border border-dashed border-[#e5ff00]/60 bg-[#0a0a0a] transition-all group-hover:scale-105 group-hover:border-[#e5ff00] group-hover:bg-[#e5ff00]/10">
+              {user?.photo_url ? (
+                <img
+                  src={fileUrl(user.photo_url)}
+                  alt="Your Avatar"
+                  className="h-full w-full rounded-full object-cover opacity-60 group-hover:opacity-100"
+                />
+              ) : (
+                <div className="h-full w-full rounded-full bg-zinc-900" />
+              )}
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="flex h-5 w-5 items-center justify-center rounded-full border border-black bg-[#e5ff00] text-black shadow-md transition-transform group-hover:scale-110">
+                  <Plus className="h-3 w-3 stroke-[3]" />
+                </div>
+              </div>
+            </div>
+          </button>
+
+          {/* Loading state */}
+          {loading && (
+            <div className="flex flex-col items-center gap-3">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="h-8 w-8 rounded-full bg-zinc-800 border border-zinc-700 animate-pulse" />
+              ))}
+            </div>
+          )}
+
+          {/* Stories List */}
+          {!loading &&
+            stories.map((story, idx) => {
+              const hoursLeft = Math.floor(story.time_left_sec / 3600);
+              const minsLeft = Math.floor((story.time_left_sec % 3600) / 60);
+
+              return (
+                <button
+                  key={story.id}
+                  type="button"
+                  data-testid={`story-item-${story.id}`}
+                  onClick={() => openViewer(idx)}
+                  className="group relative flex flex-col items-center cursor-pointer"
+                  title={`${story.display_name} (${hoursLeft > 0 ? `${hoursLeft}h` : `${minsLeft}m`} left)`}
+                >
+                  <div className="relative p-0.5 rounded-full border border-[#e5ff00] shadow-[0_0_6px_rgba(229,255,0,0.3)] group-hover:scale-105 group-hover:shadow-[0_0_10px_rgba(229,255,0,0.6)] transition-all">
+                    <div className="h-8 w-8 overflow-hidden rounded-full bg-zinc-900 border border-black flex items-center justify-center">
+                      {story.user_photo_url ? (
+                        <img
+                          src={fileUrl(story.user_photo_url)}
+                          alt={story.display_name}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center font-mono font-bold text-xs text-[#e5ff00] bg-zinc-950">
+                          {story.display_name?.slice(0, 2)?.toUpperCase()}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Media Type Indicator Badge */}
+                    <div className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-[#050505] border border-[#e5ff00] text-[#e5ff00]">
+                      {story.media_type === "video" ? (
+                        <Film className="h-1.5 w-1.5" />
+                      ) : (
+                        <ImageIcon className="h-1.5 w-1.5" />
+                      )}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+
+          {/* Modal hooks inside condition */}
+          {activeStoryIndex !== null && stories[activeStoryIndex] && (
+            <StoryViewerModal
+              stories={stories}
+              currentIndex={activeStoryIndex}
+              setCurrentIndex={setActiveStoryIndex}
+              onClose={closeViewer}
+              onDelete={handleDeleteStory}
+              currentUser={user}
+            />
+          )}
+
+          {showCreateModal && (
+            <CreateStoryModal
+              onClose={() => setShowCreateModal(false)}
+              onSuccess={() => {
+                setShowCreateModal(false);
+                loadStories();
+              }}
+            />
+          )}
+        </div>
+      );
+    } else {
+      // Expanded sidebar horizontal scrolling of stories
+      return (
+        <div className="flex flex-col p-3 border-b border-[#27272a]/40" data-testid="stories-sidebar-expanded">
+          <div className="mb-2 flex items-center justify-between">
+            <div className="flex items-center gap-1.5 font-mono text-[9px] uppercase font-bold tracking-wider text-[#e5ff00]">
+              <Sparkles className="h-3 w-3 animate-pulse" />
+              <span>TRANSMISSIONS</span>
+            </div>
+            <span className="font-mono text-[8px] text-zinc-500 uppercase tracking-widest">
+              24H LIMIT
+            </span>
+          </div>
+
+          <div className="flex items-center gap-3 overflow-x-auto pb-1.5 pt-0.5 no-scrollbar scroll-smooth">
+            {/* Post Story Button */}
+            <button
+              type="button"
+              data-testid="create-story-btn"
+              onClick={() => {
+                if (!user) {
+                  toast.error("Please log in to share a story");
+                  return;
+                }
+                setShowCreateModal(true);
+              }}
+              className="group relative flex flex-col items-center gap-1.5 flex-shrink-0 cursor-pointer"
+            >
+              <div className="relative flex h-10 w-10 items-center justify-center rounded-full border border-dashed border-[#e5ff00]/60 bg-[#0a0a0a] transition-all group-hover:scale-105 group-hover:border-[#e5ff00] group-hover:bg-[#e5ff00]/10">
+                {user?.photo_url ? (
+                  <img
+                    src={fileUrl(user.photo_url)}
+                    alt="Your Avatar"
+                    className="h-full w-full rounded-full object-cover opacity-60 group-hover:opacity-100"
+                  />
+                ) : (
+                  <div className="h-full w-full rounded-full bg-zinc-900" />
+                )}
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="flex h-5 w-5 items-center justify-center rounded-full border border-black bg-[#e5ff00] text-black shadow-md transition-transform group-hover:scale-110">
+                    <Plus className="h-3 w-3 stroke-[3]" />
+                  </div>
+                </div>
+              </div>
+              <span className="font-mono text-[8px] uppercase tracking-wider font-bold text-zinc-400 group-hover:text-[#e5ff00]">
+                + YOURS
+              </span>
+            </button>
+
+            {/* Loading Skeletons */}
+            {loading && (
+              <div className="flex items-center gap-3">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="flex flex-col items-center gap-1.5 flex-shrink-0 animate-pulse">
+                    <div className="h-10 w-10 rounded-full bg-zinc-800 border border-zinc-700" />
+                    <div className="h-2 w-8 rounded bg-zinc-800" />
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Stories circles */}
+            {!loading &&
+              stories.map((story, idx) => {
+                const isMine = user && story.user_uid === user.uid;
+                const hoursLeft = Math.floor(story.time_left_sec / 3600);
+                const minsLeft = Math.floor((story.time_left_sec % 3600) / 60);
+
+                return (
+                  <button
+                    key={story.id}
+                    type="button"
+                    data-testid={`story-item-${story.id}`}
+                    onClick={() => openViewer(idx)}
+                    className="group relative flex flex-col items-center gap-1.5 flex-shrink-0 cursor-pointer text-left"
+                  >
+                    <div className="relative p-0.5 rounded-full border border-[#e5ff00] shadow-[0_0_6px_rgba(229,255,0,0.3)] group-hover:scale-105 group-hover:shadow-[0_0_10px_rgba(229,255,0,0.6)] transition-all">
+                      <div className="h-9 w-9 overflow-hidden rounded-full bg-zinc-900 border border-black flex items-center justify-center">
+                        {story.user_photo_url ? (
+                          <img
+                            src={fileUrl(story.user_photo_url)}
+                            alt={story.display_name}
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center font-mono font-bold text-[10px] text-[#e5ff00] bg-zinc-950">
+                            {story.display_name?.slice(0, 2)?.toUpperCase()}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Media Type Indicator Badge */}
+                      <div className="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-[#050505] border border-[#e5ff00] text-[#e5ff00]">
+                        {story.media_type === "video" ? (
+                          <Film className="h-1.5 w-1.5" />
+                        ) : (
+                          <ImageIcon className="h-1.5 w-1.5" />
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col items-center">
+                      <span className="font-mono text-[8px] uppercase font-bold text-zinc-300 group-hover:text-[#e5ff00] max-w-[48px] truncate">
+                        {isMine ? "YOU" : story.display_name}
+                      </span>
+                      <span className="font-mono text-[7px] text-[#e5ff00] tracking-tight flex items-center gap-0.5">
+                        <Clock className="h-1.5 w-1.5" />
+                        {hoursLeft > 0 ? `${hoursLeft}h` : `${minsLeft}m`}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+          </div>
+
+          {/* Modal hooks inside condition */}
+          {activeStoryIndex !== null && stories[activeStoryIndex] && (
+            <StoryViewerModal
+              stories={stories}
+              currentIndex={activeStoryIndex}
+              setCurrentIndex={setActiveStoryIndex}
+              onClose={closeViewer}
+              onDelete={handleDeleteStory}
+              currentUser={user}
+            />
+          )}
+
+          {showCreateModal && (
+            <CreateStoryModal
+              onClose={() => setShowCreateModal(false)}
+              onSuccess={() => {
+                setShowCreateModal(false);
+                loadStories();
+              }}
+            />
+          )}
+        </div>
+      );
+    }
+  }
 
   return (
     <section className="mb-8 border-y border-[#27272a] bg-[#050505] py-4" data-testid="stories-section">

@@ -4,7 +4,6 @@ import { api, fileUrl } from "@/lib/api";
 import { db } from "@/lib/firebase";
 import { collection, onSnapshot } from "firebase/firestore";
 import { Search, Radio, Eye, User, Calendar, Clock, Filter, X } from "lucide-react";
-import StoriesSection from "@/components/StoriesSection";
 
 const CATEGORIES = [
   "ALL",
@@ -137,9 +136,9 @@ export default function Directory() {
             if (fsData) {
               return {
                 ...c,
-                photo_url: fsData.photo_url || c.photo_url,
+                photo_url: fsData.photo_url !== undefined ? fsData.photo_url : c.photo_url,
                 display_name: fsData.display_name || c.display_name,
-                thumbnail_url: fsData.thumbnail_url || c.thumbnail_url,
+                thumbnail_url: fsData.thumbnail_url !== undefined ? fsData.thumbnail_url : c.thumbnail_url,
                 is_live: Boolean(fsData.is_live ?? fsData.isLive ?? c.is_live),
                 viewer_count: fsData.viewer_count ?? c.viewer_count,
                 stream_title: fsData.stream_title || c.stream_title,
@@ -246,8 +245,6 @@ export default function Directory() {
 
   return (
     <div>
-      <StoriesSection />
-
       <div className="mx-auto max-w-[1440px] px-6 pt-8 pb-24 sm:pb-28 lg:pb-32" data-testid="streamer-directory-page">
       {/* Header Banner */}
       <div className="border border-[#27272a] bg-[#0a0a0a] p-8">
@@ -410,9 +407,22 @@ export default function Directory() {
   );
 }
 
+const DIRECTORY_THUMBS = [
+  "https://images.unsplash.com/photo-1541126274323-dbac58d14741?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDJ8MHwxfHNlYXJjaHwxfHx1bmRlcmdyb3VuZCUyMHJhdmUlMjBkaiUyMHNldHxlbnwwfHx8fDE3ODU0NDAwMzJ8MA&ixlib=rb-4.1.0&q=85",
+  "https://images.unsplash.com/photo-1516873240891-4bf014598ab4?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDJ8MHwxfHNlYXJjaHw0fHx1bmRlcmdyb3VuZCUyMHJhdmUlMjBkaiUyMHNldHxlbnwwfHx8fDE3ODU0NDAwMzJ8MA&ixlib=rb-4.1.0&q=85",
+  "https://images.unsplash.com/photo-1496337589254-7e19d01cec44?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDJ8MHwxfHNlYXJjaHwzfHx1bmRlcmdyb3VuZCUyMHJhdmUlMjBkaiUyMHNldHxlbnwwfHx8fDE3ODU0NDAwMzJ8MA&ixlib=rb-4.1.0&q=85",
+];
+
+function directoryHashPick(str, arr) {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) | 0;
+  return arr[Math.abs(h) % arr.length];
+}
+
 function StreamerCard({ channel }) {
   const isLive = Boolean(channel.is_live);
   const nextSet = Array.isArray(channel.schedule) && channel.schedule.length > 0 ? channel.schedule[0] : null;
+  const channelSlug = channel.username || channel.channel_id || "channel";
 
   return (
     <div
@@ -450,6 +460,15 @@ function StreamerCard({ channel }) {
           ) : (
             <span className="chip flex-shrink-0 text-[10px]">OFF AIR</span>
           )}
+        </div>
+
+        {/* Landscape Preview Thumbnail */}
+        <div className="mt-4 aspect-video w-full overflow-hidden border border-[#27272a] bg-black relative">
+          <img
+            src={channel.thumbnail_url ? fileUrl(channel.thumbnail_url) : directoryHashPick(channelSlug, DIRECTORY_THUMBS)}
+            alt=""
+            className={`h-full w-full object-cover transition-all duration-300 ${channel.thumbnail_url ? "" : "grayscale group-hover:grayscale-0"}`}
+          />
         </div>
 
         {/* Stream Details / Title */}

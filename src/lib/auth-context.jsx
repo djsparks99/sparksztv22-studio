@@ -16,9 +16,32 @@ import { api, setToken, getToken, apiErrorMessage } from "@/lib/api";
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(undefined); // undefined = loading
+  const [user, setUser] = useState(() => {
+    if (typeof window !== "undefined") {
+      const cached = localStorage.getItem("sparkz_user_profile");
+      if (cached) {
+        try {
+          return JSON.parse(cached);
+        } catch (e) {
+          return undefined;
+        }
+      }
+    }
+    return undefined; // undefined = loading
+  });
   const [needsUsername, setNeedsUsername] = useState(false);
   const [pendingFirebaseUser, setPendingFirebaseUser] = useState(null);
+
+  // Sync user state changes to localStorage
+  useEffect(() => {
+    if (user !== undefined) {
+      if (user) {
+        localStorage.setItem("sparkz_user_profile", JSON.stringify(user));
+      } else {
+        localStorage.removeItem("sparkz_user_profile");
+      }
+    }
+  }, [user]);
 
   // Sync token to Express backend so legacy API calls work seamlessly
   const syncExpressToken = async (fbUser, profileData) => {

@@ -9,6 +9,8 @@ import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import multer from "multer";
 import admin from "firebase-admin";
+import { getAuth } from "firebase-admin/auth";
+import { getFirestore } from "firebase-admin/firestore";
 import { WebSocketServer, WebSocket as WSWebSocket } from "ws";
 
 import { 
@@ -21,6 +23,26 @@ import {
 } from "@aws-sdk/client-ivs";
 
 dotenv.config();
+
+let firestoreDatabaseId: string | undefined = undefined;
+try {
+  const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+  if (fs.existsSync(configPath)) {
+    const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+    if (config.firestoreDatabaseId) {
+      firestoreDatabaseId = config.firestoreDatabaseId;
+    }
+  }
+} catch (e) {
+  console.warn("Failed to read firebase-applet-config.json:", e);
+}
+
+function getFirestoreDb() {
+  if (firestoreDatabaseId) {
+    return getFirestore(firestoreDatabaseId);
+  }
+  return getFirestore();
+}
 
 console.log("SPARKZ.TV - Server booting up with universal avatar sync.");
 
@@ -266,7 +288,7 @@ async function getMasterChannel() {
   const user = db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2")!;
   
   try {
-    const dbFirestore = admin.firestore();
+    const dbFirestore = getFirestoreDb();
     
     const fetchFromFirestore = async () => {
       const userSnap = await dbFirestore.collection("users").doc("nsU1v44XFnN3FloJvNePqj6cBG2").get();
@@ -401,7 +423,7 @@ async function startServer() {
       }
 
       try {
-        const dbFirestore = admin.firestore();
+        const dbFirestore = getFirestoreDb();
         const snapshot = await dbFirestore.collection("channels").get();
         
         snapshot.forEach((doc) => {
@@ -465,7 +487,7 @@ async function startServer() {
       }
 
       try {
-        const dbFirestore = admin.firestore();
+        const dbFirestore = getFirestoreDb();
         let docSnap = await dbFirestore.collection("channels").doc(requestedId).get();
         if (!docSnap.exists) {
           const querySnap = await dbFirestore.collection("channels")
@@ -573,14 +595,34 @@ async function startServer() {
   const handleUserUpdate = async (req: Request, res: Response) => {
     try {
       const user = db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2")!;
+      const userUpdates: any = {};
+      const channelUpdates: any = {};
+
       if (req.body?.display_name !== undefined) {
         user.display_name = req.body.display_name;
         const channel = await getMasterChannel();
         channel.display_name = req.body.display_name;
+        userUpdates.display_name = req.body.display_name;
+        channelUpdates.display_name = req.body.display_name;
       }
       if (req.body?.bio !== undefined) {
         user.bio = req.body.bio;
+        userUpdates.bio = req.body.bio;
       }
+
+      try {
+        const dbFirestore = getFirestoreDb();
+        if (Object.keys(userUpdates).length > 0) {
+          await dbFirestore.collection("users").doc("nsU1v44XFnN3FloJvNePqj6cBG2").set(userUpdates, { merge: true });
+        }
+        if (Object.keys(channelUpdates).length > 0) {
+          await dbFirestore.collection("channels").doc("djsparkz").set(channelUpdates, { merge: true });
+          await dbFirestore.collection("channels").doc("nsU1v44XFnN3FloJvNePqj6cBG2").set(channelUpdates, { merge: true });
+        }
+      } catch (firestoreErr: any) {
+        console.warn("[Firestore user sync error]:", firestoreErr.message);
+      }
+
       return res.json({
         ...user,
         username: "djsparkz",
@@ -602,21 +644,36 @@ async function startServer() {
   const handleChannelUpdate = async (req: Request, res: Response) => {
     try {
       const channel = await getMasterChannel();
+      const updates: any = {};
+
       if (req.body?.stream_title !== undefined) {
         channel.stream_title = req.body.stream_title;
+        updates.stream_title = req.body.stream_title;
       }
       if (req.body?.category !== undefined) {
-        const categories = ["music", "talk", "gaming", "art", "outdoors", "lounge", "dj_mix", "podcast", "radio", "vibes"];
-        if (!categories.includes(req.body.category)) {
-          return res.status(400).json({ error: "Invalid category. Must be one of: " + categories.join(", ") });
+        if (typeof req.body.category !== "string") {
+          return res.status(400).json({ error: "Category must be a string" });
         }
         channel.category = req.body.category;
+        updates.category = req.body.category;
       }
       if (req.body?.schedule !== undefined) {
         (channel as any).schedule = req.body.schedule;
+        updates.schedule = req.body.schedule;
       }
       if (req.body?.thumbnail_url !== undefined) {
         channel.thumbnail_url = req.body.thumbnail_url;
+        updates.thumbnail_url = req.body.thumbnail_url;
+      }
+
+      try {
+        const dbFirestore = getFirestoreDb();
+        if (Object.keys(updates).length > 0) {
+          await dbFirestore.collection("channels").doc("djsparkz").set(updates, { merge: true });
+          await dbFirestore.collection("channels").doc("nsU1v44XFnN3FloJvNePqj6cBG2").set(updates, { merge: true });
+        }
+      } catch (firestoreErr: any) {
+        console.warn("[Firestore channel update sync error]:", firestoreErr.message);
       }
       
       return res.json(channelPublic(channel, { include_stream_key: true }));
@@ -669,6 +726,21 @@ async function startServer() {
       const channel = await getMasterChannel();
       channel.photo_url = photoUrl;
 
+      try {
+        const dbFirestore = getFirestoreDb();
+        await dbFirestore.collection("users").doc("nsU1v44XFnN3FloJvNePqj6cBG2").set({
+          photo_url: photoUrl
+        }, { merge: true });
+        await dbFirestore.collection("channels").doc("djsparkz").set({
+          photo_url: photoUrl
+        }, { merge: true });
+        await dbFirestore.collection("channels").doc("nsU1v44XFnN3FloJvNePqj6cBG2").set({
+          photo_url: photoUrl
+        }, { merge: true });
+      } catch (firestoreErr: any) {
+        console.warn("[Firestore photo sync error]:", firestoreErr.message);
+      }
+
       return res.json({
         success: true,
         photo_url: photoUrl,
@@ -678,7 +750,7 @@ async function startServer() {
         user: {
           ...user,
           username: "djsparkz",
-          display_name: "djsparkz",
+          display_name: user.display_name || "djsparkz",
           photo_url: photoUrl,
           photoUrl: photoUrl,
           avatar: photoUrl,
@@ -706,6 +778,18 @@ async function startServer() {
 
       channel.thumbnail_url = thumbnailUrl;
 
+      try {
+        const dbFirestore = getFirestoreDb();
+        await dbFirestore.collection("channels").doc("djsparkz").set({
+          thumbnail_url: thumbnailUrl
+        }, { merge: true });
+        await dbFirestore.collection("channels").doc("nsU1v44XFnN3FloJvNePqj6cBG2").set({
+          thumbnail_url: thumbnailUrl
+        }, { merge: true });
+      } catch (firestoreErr: any) {
+        console.warn("[Firestore thumbnail sync error]:", firestoreErr.message);
+      }
+
       return res.json({
         success: true,
         thumbnail_url: thumbnailUrl,
@@ -720,6 +804,19 @@ async function startServer() {
     try {
       const channel = await getMasterChannel();
       channel.thumbnail_url = null;
+
+      try {
+        const dbFirestore = getFirestoreDb();
+        await dbFirestore.collection("channels").doc("djsparkz").set({
+          thumbnail_url: null
+        }, { merge: true });
+        await dbFirestore.collection("channels").doc("nsU1v44XFnN3FloJvNePqj6cBG2").set({
+          thumbnail_url: null
+        }, { merge: true });
+      } catch (firestoreErr: any) {
+        console.warn("[Firestore thumbnail delete sync error]:", firestoreErr.message);
+      }
+
       return res.json({ success: true });
     } catch (err: any) {
       return res.status(500).json({ error: "Failed to clear channel thumbnail" });
@@ -788,10 +885,10 @@ async function startServer() {
 
       if (token && token !== "guest") {
         try {
-          const decodedToken = await admin.auth().verifyIdToken(token);
+          const decodedToken = await getAuth().verifyIdToken(token);
           uid = decodedToken.uid;
           
-          const dbFirestore = admin.firestore();
+          const dbFirestore = getFirestoreDb();
           const userSnap = await dbFirestore.collection("users").doc(uid).get();
           if (userSnap.exists) {
             const data = userSnap.data();
@@ -881,7 +978,7 @@ async function startServer() {
             if (isHighlighted) {
               wattsVal = Math.max(0, wattsVal - 50);
               try {
-                const dbFirestore = admin.firestore();
+                const dbFirestore = getFirestoreDb();
                 await dbFirestore.collection("users").doc(client.uid).update({ watts: wattsVal });
               } catch (e) {}
               const localUser = db.users.get(client.uid);

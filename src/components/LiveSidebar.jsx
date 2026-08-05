@@ -6,6 +6,7 @@ import { db } from "@/lib/firebase";
 import { collection, onSnapshot } from "firebase/firestore";
 import { ChevronLeft, ChevronRight, User, Radio, Bell, BellOff, Tv, Calendar, Heart, ChevronDown, ChevronUp } from "lucide-react";
 import { toast } from "sonner";
+import StoriesSection from "@/components/StoriesSection";
 
 const STORAGE_KEY = "sparkz_sidebar_collapsed";
 const CHIMES_KEY = "sparkz_chime_reminders";
@@ -397,6 +398,8 @@ export default function LiveSidebar() {
       </header>
 
       <div className="flex-1 overflow-y-auto divide-y divide-[#27272a]/40">
+        <StoriesSection sidebar={true} collapsed={collapsed} />
+
         {!loaded ? (
           <div className="p-3 space-y-2">
             {Array.from({ length: 4 }).map((_, i) => (
