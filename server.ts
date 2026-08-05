@@ -16,13 +16,12 @@ import {
   ListChannelsCommand,
   GetStreamKeyCommand,
   ListStreamKeysCommand,
-  GetStreamKeyCommand as GetStreamKeyCmd,
   GetStreamCommand 
 } from "@aws-sdk/client-ivs";
 
 dotenv.config();
 
-console.log("SPARKZ.TV - Server booting up with synchronized profile & channel mapping.");
+console.log("SPARKZ.TV - Server booting up with full UI branding & persistent sync.");
 
 try {
   if (!admin.apps || admin.apps.length === 0) {
@@ -111,7 +110,6 @@ async function getOrCreatePersistentIvsChannel(username: string): Promise<{
     } catch (e: any) {}
   }
 
-  // Fallback credentials if AWS is offline
   return {
     playbackUrl: "https://fcc3ddae59ed.us-west-2.playback.live-video.net/api/video/v1/us-west-2.536395396152.channel.d-8HJvvryP0PNm.m3u8",
     streamKey: "SK_us-west-2_dummyKey999999",
@@ -191,6 +189,8 @@ const db = new InMemStore();
 function channelPublic(c: ChannelDoc, opts: { include_stream_key?: boolean } = {}) {
   if (!c || c.channel_id === "undefined") return {};
   const playbackId = c.playback_id || "";
+  const user = db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2");
+  const activePhoto = c.photo_url || user?.photo_url || null;
 
   const out: Record<string, any> = {
     channel_id: "djsparkz",
@@ -198,12 +198,12 @@ function channelPublic(c: ChannelDoc, opts: { include_stream_key?: boolean } = {
     user_uid: "nsU1v44XFnN3FloJvNePqj6cBG2",
     username: "djsparkz",
     display_name: "djsparkz",
-    photo_url: c.photo_url,
-    photoUrl: c.photo_url,
-    thumbnail_url: c.thumbnail_url,
+    photo_url: activePhoto,
+    photoUrl: activePhoto,
+    thumbnail_url: activePhoto,
     playback_id: playbackId,
     playbackUrl: playbackId,
-    stream_title: c.stream_title || "djsparkz Live Stream",
+    stream_title: "djsparkz's Live Stream",
     category: c.category || "music",
     is_live: Boolean(c.is_live),
     isLive: Boolean(c.is_live),
@@ -222,9 +222,10 @@ function channelPublic(c: ChannelDoc, opts: { include_stream_key?: boolean } = {
 
 async function getMasterChannel() {
   let chan = db.channels.get("djsparkz") || db.channels.get("nsU1v44XFnN3FloJvNePqj6cBG2");
+  const user = db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2");
+  
   if (!chan) {
     const ivsData = await getOrCreatePersistentIvsChannel("djsparkz");
-    const user = db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2");
     chan = {
       channel_id: "djsparkz",
       user_uid: "nsU1v44XFnN3FloJvNePqj6cBG2",
@@ -245,6 +246,8 @@ async function getMasterChannel() {
     };
     db.channels.set("djsparkz", chan);
     db.channels.set("nsU1v44XFnN3FloJvNePqj6cBG2", chan);
+  } else if (user?.photo_url) {
+    chan.photo_url = user.photo_url;
   }
   return chan;
 }
