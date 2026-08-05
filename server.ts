@@ -9,6 +9,7 @@ import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import multer from "multer";
 import admin from "firebase-admin";
+import { WebSocketServer, WebSocket as WSWebSocket } from "ws";
 
 import { 
   IvsClient, 
@@ -435,7 +436,223 @@ async function startServer() {
     res.sendFile(path.join(distPath, "index.html"));
   });
 
+  const CHAT_COLORS = [
+    "#ff4a5a", "#e5ff00", "#34d399", "#22d3ee", "#a78bfa",
+    "#fb7185", "#38bdf8", "#fb923c", "#f472b6", "#a3e635"
+  ];
+
+  const chatRooms = new Map<string, Set<any>>();
+  const chatHistory = new Map<string, any[]>();
+
   const server = http.createServer(app);
+  const wss = new WebSocketServer({ noServer: true });
+
+  server.on("upgrade", (request, socket, head) => {
+    try {
+      const urlObj = new URL(request.url || "", `http://${request.headers.host || "localhost"}`);
+      const pathname = urlObj.pathname;
+
+      if (pathname.startsWith("/api/ws/chat/")) {
+        wss.handleUpgrade(request, socket, head, (ws) => {
+          wss.emit("connection", ws, request);
+        });
+      } else {
+        socket.destroy();
+      }
+    } catch (e) {
+      socket.destroy();
+    }
+  });
+
+  wss.on("connection", async (ws: any, request: any) => {
+    try {
+      const urlObj = new URL(request.url || "", `http://${request.headers.host || "localhost"}`);
+      const pathname = urlObj.pathname;
+      const chatMatch = pathname.match(/^\/api\/ws\/chat\/([^/]+)$/);
+      
+      if (!chatMatch) {
+        ws.close();
+        return;
+      }
+
+      const roomName = decodeURIComponent(chatMatch[1]);
+      const token = urlObj.searchParams.get("token") || "";
+      const guestNameParam = urlObj.searchParams.get("guest_name") || "";
+
+      let uid = "guest-" + Math.random().toString(36).substring(2, 9);
+      let username = guestNameParam ? guestNameParam.trim() : "Guest";
+      let displayName = username;
+      let photoUrl: string | null = null;
+      let badges = ["guest"];
+      let color = CHAT_COLORS[Math.floor(Math.random() * CHAT_COLORS.length)];
+      let wattsVal = 0;
+
+      if (token && token !== "guest") {
+        try {
+          const decodedToken = await admin.auth().verifyIdToken(token);
+          uid = decodedToken.uid;
+          
+          const dbFirestore = admin.firestore();
+          const userSnap = await dbFirestore.collection("users").doc(uid).get();
+          if (userSnap.exists) {
+            const data = userSnap.data();
+            if (data) {
+              username = data.username || data.display_name || "User";
+              displayName = data.display_name || username;
+              photoUrl = data.photo_url || null;
+              wattsVal = typeof data.watts === "number" ? data.watts : 100;
+            }
+          } else {
+            const localUser = db.users.get(uid);
+            if (localUser) {
+              username = localUser.username;
+              displayName = localUser.display_name;
+              photoUrl = localUser.photo_url;
+              wattsVal = typeof localUser.watts === "number" ? localUser.watts : 100;
+            }
+          }
+
+          badges = [];
+          if (username === roomName) {
+            badges.push("broadcaster");
+          }
+          if (wattsVal >= 1000) {
+            badges.push("watts_king");
+          }
+          if (badges.length === 0) {
+            badges.push("supporter");
+          }
+        } catch (err) {
+          console.error("[WS Auth Error]:", err);
+        }
+      }
+
+      const client = {
+        ws,
+        uid,
+        username,
+        displayName,
+        photoUrl,
+        badges,
+        color,
+        roomName
+      };
+
+      if (!chatRooms.has(roomName)) {
+        chatRooms.set(roomName, new Set());
+      }
+      chatRooms.get(roomName)!.add(client);
+
+      console.log(`[WS] User ${username} connected to room: ${roomName}`);
+
+      const history = chatHistory.get(roomName) || [];
+      for (const msg of history) {
+        if (ws.readyState === 1) {
+          ws.send(JSON.stringify(msg));
+        }
+      }
+
+      ws.on("message", async (rawMsg: any) => {
+        try {
+          const data = JSON.parse(rawMsg.toString());
+          
+          if (data.type === "typing") {
+            const typingPayload = {
+              type: "typing",
+              uid: client.uid,
+              username: client.username,
+              display_name: client.displayName,
+              is_typing: data.is_typing
+            };
+            const roomClients = chatRooms.get(roomName);
+            if (roomClients) {
+              for (const c of roomClients) {
+                if (c.ws !== ws && c.ws.readyState === 1) {
+                  c.ws.send(JSON.stringify(typingPayload));
+                }
+              }
+            }
+          } else {
+            const text = data.text || "";
+            if (!text.trim()) return;
+
+            const isHighlighted = !!data.is_highlighted;
+            const highlightType = data.highlight_type || "neon_glow";
+
+            if (isHighlighted) {
+              wattsVal = Math.max(0, wattsVal - 50);
+              try {
+                const dbFirestore = admin.firestore();
+                await dbFirestore.collection("users").doc(client.uid).update({ watts: wattsVal });
+              } catch (e) {}
+              const localUser = db.users.get(client.uid);
+              if (localUser) {
+                localUser.watts = wattsVal;
+              }
+            }
+
+            const messagePayload = {
+              type: "message",
+              id: "msg-" + Date.now() + "-" + Math.random().toString(36).substring(2, 9),
+              text: text,
+              sender_uid: client.uid,
+              sender_username: client.username,
+              sender_display_name: client.displayName,
+              sender_photo_url: client.photoUrl,
+              created_at: new Date().toISOString(),
+              is_highlighted: isHighlighted,
+              highlight_type: highlightType,
+              sender_badges: client.badges,
+              sender_color: client.color,
+              user_watts: wattsVal
+            };
+
+            if (!chatHistory.has(roomName)) {
+              chatHistory.set(roomName, []);
+            }
+            const roomHistory = chatHistory.get(roomName)!;
+            roomHistory.push(messagePayload);
+            if (roomHistory.length > 50) {
+              roomHistory.shift();
+            }
+
+            const roomClients = chatRooms.get(roomName);
+            if (roomClients) {
+              for (const c of roomClients) {
+                if (c.ws.readyState === 1) {
+                  c.ws.send(JSON.stringify(messagePayload));
+                }
+              }
+            }
+          }
+        } catch (e) {
+          console.error("[WS Message Error]:", e);
+        }
+      });
+
+      ws.on("close", () => {
+        console.log(`[WS] User ${username} disconnected from room: ${roomName}`);
+        const roomClients = chatRooms.get(roomName);
+        if (roomClients) {
+          roomClients.delete(client);
+          if (roomClients.size === 0) {
+            chatRooms.delete(roomName);
+          }
+        }
+      });
+
+      ws.on("error", (err: any) => {
+        console.error(`[WS] Connection error for ${username}:`, err);
+      });
+
+    } catch (err) {
+      console.error("[WS Connection Handling Error]:", err);
+      try {
+        ws.close();
+      } catch {}
+    }
+  });
+
   server.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);
   });
