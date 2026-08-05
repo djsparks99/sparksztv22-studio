@@ -84,9 +84,7 @@ async function getOrCreatePersistentIvsChannel(username: string): Promise<{
           };
         }
       }
-    } catch (e: any) {
-      console.warn(`[AWS IVS Channel Lookup Error]: ${e.message || e}`);
-    }
+    } catch (e: any) {}
 
     try {
       const createCmd = new CreateChannelCommand({
@@ -109,19 +107,10 @@ async function getOrCreatePersistentIvsChannel(username: string): Promise<{
           arn: channelArn,
         };
       }
-    } catch (e: any) {
-      console.warn(`[AWS IVS Channel Creation Error]: ${e.message || e}`);
-    }
+    } catch (e: any) {}
   }
 
-  // Gracefully fallback instead of crashing server if AWS IVS is not configured or fails
-  console.warn(`[AWS IVS Fallback] AWS IVS not available or not configured. Using fallback demo stream for ${username}.`);
-  return {
-    playbackUrl: "https://fcc3ed1611b0.us-east-1.playback.live-video.net/api/video/v1/us-east-1.907205459387.channel.mndhuZg197Y6.m3u8",
-    streamKey: "fallback-stream-key-djsparkz-123456",
-    ingestEndpoint: "rtmps://global-contribute.live-video.net:443/app/",
-    arn: `arn:aws:ivs:eu-west-1:123456789012:channel/mock-sparkz-${username}`,
-  };
+  throw new Error("Failed to communicate with AWS IVS.");
 }
 
 const uploadsDir = path.join(process.cwd(), "uploads");
@@ -233,7 +222,18 @@ async function authenticateToken(req: Request): Promise<UserDoc | null> {
 async function getMasterChannel() {
   let chan = db.channels.get("djsparkz") || db.channels.get("nsU1v44XFnN3FloJvNePqj6cBG2");
   if (!chan) {
-    const ivsData = await getOrCreatePersistentIvsChannel("djsparkz");
+    let ivsData;
+    try {
+      ivsData = await getOrCreatePersistentIvsChannel("djsparkz");
+    } catch (err: any) {
+      console.warn(`[AWS IVS Initialization Failed]: ${err.message || err}. Using demo/mock fallback stream.`);
+      ivsData = {
+        playbackUrl: "https://fcc3ed1611b0.us-east-1.playback.live-video.net/api/video/v1/us-east-1.907205459387.channel.mndhuZg197Y6.m3u8",
+        streamKey: "fallback-stream-key-djsparkz-123456",
+        ingestEndpoint: "rtmps://global-contribute.live-video.net:443/app/",
+        arn: "arn:aws:ivs:eu-west-1:123456789012:channel/mock-sparkz-djsparkz",
+      };
+    }
     chan = {
       channel_id: "djsparkz",
       user_uid: "nsU1v44XFnN3FloJvNePqj6cBG2",
@@ -258,7 +258,7 @@ async function getMasterChannel() {
   return chan;
 }
 
-const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 10000;
+const PORT = 3000;
 const JWT_SECRET = process.env.JWT_SECRET || "sparkz_secret_key_12345";
 
 export const app = express();
