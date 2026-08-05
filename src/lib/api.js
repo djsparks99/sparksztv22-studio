@@ -142,6 +142,57 @@ export function fileToBase64(file) {
   });
 }
 
+export function compressAndResizeImage(file, maxW = 400, maxH = 400, quality = 0.7) {
+  return new Promise((resolve, reject) => {
+    if (!file) return resolve("");
+    if (typeof file === "string") return resolve(file);
+    
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target.result;
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+
+        // Calculate new dimensions keeping aspect ratio
+        if (width > maxW || height > maxH) {
+          if (width / height > maxW / maxH) {
+            height = Math.round((height * maxW) / width);
+            width = maxW;
+          } else {
+            width = Math.round((width * maxH) / height);
+            height = maxH;
+          }
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          reject(new Error("Could not get canvas context"));
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, width, height);
+
+        // Convert to jpeg base64 with requested quality
+        const dataUrl = canvas.toDataURL("image/jpeg", quality);
+        resolve(dataUrl);
+      };
+      img.onerror = (err) => {
+        reject(err);
+      };
+    };
+    reader.onerror = (err) => {
+      reject(err);
+    };
+  });
+}
+
 api.interceptors.request.use(async (config) => {
   const token = getToken();
   if (token) {

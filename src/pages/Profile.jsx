@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, fileUrl, apiErrorMessage, fileToBase64 } from "@/lib/api";
+import { api, fileUrl, apiErrorMessage, fileToBase64, compressAndResizeImage } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { updateUserProfileInFirestore } from "@/lib/firebase";
 import { toast } from "sonner";
@@ -102,7 +102,7 @@ export default function Profile() {
     }
     setUploading(true);
     try {
-      const base64 = await fileToBase64(file);
+      const base64 = await compressAndResizeImage(file, 400, 400, 0.7);
       const { data } = await api.post("/users/me/photo", {
         image: base64,
         photo: base64,
