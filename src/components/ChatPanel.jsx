@@ -295,20 +295,44 @@ export default function ChatPanel({ username }) {
       const now = Date.now();
       if (val.trim().length > 0) {
         if (now - lastTypingSentRef.current > 2000) {
-          wsRef.current.send(JSON.stringify({ type: "typing", is_typing: true }));
+          wsRef.current.send(
+            JSON.stringify({
+              type: "typing",
+              is_typing: true,
+              sender_display_name: user?.display_name || null,
+              sender_username: user?.username || null,
+              sender_photo_url: user?.photo_url || user?.photoUrl || null,
+            })
+          );
           lastTypingSentRef.current = now;
         }
 
         if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
         typingTimerRef.current = setTimeout(() => {
           if (wsRef.current && wsRef.current.readyState === 1) {
-            wsRef.current.send(JSON.stringify({ type: "typing", is_typing: false }));
+            wsRef.current.send(
+              JSON.stringify({
+                type: "typing",
+                is_typing: false,
+                sender_display_name: user?.display_name || null,
+                sender_username: user?.username || null,
+                sender_photo_url: user?.photo_url || user?.photoUrl || null,
+              })
+            );
           }
           lastTypingSentRef.current = 0;
         }, 2500);
       } else {
         if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
-        wsRef.current.send(JSON.stringify({ type: "typing", is_typing: false }));
+        wsRef.current.send(
+          JSON.stringify({
+            type: "typing",
+            is_typing: false,
+            sender_display_name: user?.display_name || null,
+            sender_username: user?.username || null,
+            sender_photo_url: user?.photo_url || user?.photoUrl || null,
+          })
+        );
         lastTypingSentRef.current = 0;
       }
     }
@@ -321,7 +345,15 @@ export default function ChatPanel({ username }) {
 
     // Clear typing indicator on send
     if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
-    wsRef.current.send(JSON.stringify({ type: "typing", is_typing: false }));
+    wsRef.current.send(
+      JSON.stringify({
+        type: "typing",
+        is_typing: false,
+        sender_display_name: user?.display_name || null,
+        sender_username: user?.username || null,
+        sender_photo_url: user?.photo_url || user?.photoUrl || null,
+      })
+    );
     lastTypingSentRef.current = 0;
 
     wsRef.current.send(
@@ -329,6 +361,9 @@ export default function ChatPanel({ username }) {
         text: t,
         is_highlighted: isHighlight,
         highlight_type: "neon_glow",
+        sender_display_name: user?.display_name || null,
+        sender_username: user?.username || null,
+        sender_photo_url: user?.photo_url || user?.photoUrl || null,
       })
     );
 

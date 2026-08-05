@@ -952,8 +952,8 @@ async function startServer() {
             const typingPayload = {
               type: "typing",
               uid: client.uid,
-              username: client.username,
-              display_name: client.displayName,
+              username: data.sender_username || client.username,
+              display_name: data.sender_display_name || client.displayName,
               is_typing: data.is_typing
             };
             const roomClients = chatRooms.get(roomName);
@@ -984,9 +984,9 @@ async function startServer() {
               id: "msg-" + Date.now() + "-" + Math.random().toString(36).substring(2, 9),
               text: text,
               sender_uid: client.uid,
-              sender_username: client.username,
-              sender_display_name: client.displayName,
-              sender_photo_url: client.photoUrl,
+              sender_username: data.sender_username || client.username,
+              sender_display_name: data.sender_display_name || client.displayName,
+              sender_photo_url: data.sender_photo_url !== undefined ? data.sender_photo_url : client.photoUrl,
               created_at: new Date().toISOString(),
               is_highlighted: isHighlighted,
               highlight_type: highlightType,
