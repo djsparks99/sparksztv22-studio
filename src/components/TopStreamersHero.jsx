@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Eye, Radio, Trophy, Play, User } from "lucide-react";
 import { fileUrl } from "@/lib/api";
 import HlsPlayer from "@/components/HlsPlayer";
+import { useAuth } from "@/lib/auth-context";
 
 const FALLBACK_THUMBS = [
   "https://images.unsplash.com/photo-1541126274323-dbac58d14741?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDJ8MHwxfHNlYXJjaHwxfHx1bmRlcmdyb3VuZCUyMHJhdmUlMjBkaiUyMHNldHxlbnwwfHx8fDE3ODU0NDAwMzJ8MA&ixlib=rb-4.1.0&q=85",
@@ -20,6 +21,7 @@ function hashPick(str, arr) {
 const DUMMY_USERNAMES = ["pirate_fm", "acid_vault", "dub_station", "test", "demo", "undefined", "channel"];
 
 export default function TopStreamersHero({ allChannels = [] }) {
+  const { user } = useAuth();
   // Filter out dummy/test channels, incomplete records, and deduplicate by username
   const seenUsernames = new Set();
   const validChannels = (allChannels || []).filter((c) => {
@@ -77,13 +79,27 @@ export default function TopStreamersHero({ allChannels = [] }) {
   const isLive = Boolean(activeStreamer.is_live || activeStreamer.isLive);
   const activeSlug = activeStreamer.username || activeStreamer.channel_id || activeStreamer.id || "channel";
   const activeViews = Number(activeStreamer.viewer_count || activeStreamer.viewerCount || activeStreamer.views || 0);
-  const activeThumb = activeStreamer.thumbnail_url
-    ? fileUrl(activeStreamer.thumbnail_url)
+
+  // Check channel.thumbnail_url, channel.thumbnailUrl, or channel.preview_image (or previewImage)
+  const thumbnailSource = activeStreamer.thumbnail_url || activeStreamer.thumbnailUrl || activeStreamer.preview_image || activeStreamer.previewImage;
+  const activeThumb = thumbnailSource
+    ? fileUrl(thumbnailSource)
     : activeStreamer.banner_url
     ? fileUrl(activeStreamer.banner_url)
     : hashPick(activeSlug, FALLBACK_THUMBS);
 
-  const avatarUrl = activeStreamer.photo_url || activeStreamer.photoUrl || activeStreamer.user_photo_url || (activeStreamer.user && (activeStreamer.user.photo_url || activeStreamer.user.photoUrl));
+  const isMe = user && (
+    (user.uid && user.uid === activeStreamer.user_uid) ||
+    (user.username && user.username.toLowerCase() === activeSlug.toLowerCase())
+  );
+
+  // Dynamically render channel.photo_url or user.photo_url with high quality robotic fallback
+  const avatarUrl = activeStreamer.photo_url || 
+                    activeStreamer.photoUrl || 
+                    (isMe && (user.photo_url || user.photoUrl)) ||
+                    activeStreamer.user_photo_url || 
+                    (activeStreamer.user && (activeStreamer.user.photo_url || activeStreamer.user.photoUrl)) ||
+                    `https://api.dicebear.com/7.x/bottts/svg?seed=${activeSlug}`;
 
   const totalLiveViewers = liveChannels.reduce(
     (sum, c) => sum + Number(c.viewer_count || c.viewerCount || c.views || 0),
