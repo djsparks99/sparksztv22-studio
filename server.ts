@@ -81,16 +81,17 @@ async function createIvsChannel(name: string): Promise<{
         return { playbackUrl, streamKey, ingestEndpoint, arn };
       }
     } catch (e: any) {
-      console.warn("[AWS IVS] CreateChannelCommand returned 403/Error. Falling back to secure stream simulator:", e.message || e);
+      console.warn("[AWS IVS] CreateChannelCommand returned error. Using stable simulator profile:", e.message || e);
     }
   }
 
-  const cryptoMod = await import("crypto");
-  const randId = cryptoMod.randomBytes(6).toString("hex");
-  const channelId = cryptoMod.randomBytes(6).toString("hex");
+  // Stable static mock identifiers based on username so they never shift on reload
+  const hash = crypto.createHash("md5").update(name).digest("hex");
+  const randId = hash.substring(0, 12);
+  const channelId = hash.substring(12, 24);
   return {
     playbackUrl: `https://${randId}.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.${channelId}.m3u8`,
-    streamKey: `sk_us-east-1_${channelId}_${cryptoMod.randomBytes(12).toString("hex")}`,
+    streamKey: `sk_us-east-1_${channelId}_${hash}`,
     ingestEndpoint: `rtmps://${randId}.global-ingest.live-video.net:443/app/`,
     arn: `arn:aws:ivs:us-east-1:123456789012:channel/${channelId}`,
   };
@@ -160,9 +161,9 @@ class InMemStore {
       display_name: "djsparkz",
       photo_url: null,
       thumbnail_url: null,
-      ivs_channel_arn: "",
-      stream_key: "",
-      playback_id: "",
+      ivs_channel_arn: "arn:aws:ivs:us-east-1:123456789012:channel/djsparkzstatic",
+      stream_key: "sk_us-east-1_djsparkzstatic_permanentkey99",
+      playback_id: "https://djsparkz.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.djsparkzstatic.m3u8",
       stream_title: "djsparkz's Live Stream",
       category: "music",
       is_live: false,
@@ -232,7 +233,41 @@ async function getOrCreateChannelForUser(uid: string, username: string, forceNew
   if (!uid) uid = "nsU1v44XFnN3FloJvNePqj6cBG2";
   if (!username) username = "djsparkz";
 
+  // Check if channel already exists in memory cache so keys never change randomly
+  const existing = db.channels.get(uid);
+  if (existing && !forceNew && existing.stream_key) {
+    return {
+      uid,
+      username,
+      ivs_channel_arn: existing.ivs_channel_arn,
+      stream_key: existing.stream_key,
+      playback_id: existing.playback_id,
+      rtmp_url: existing.rtmp_url || "rtmps://global-ingest.live-video.net:443/app/",
+      updated_at: new Date()
+    };
+  }
+
   const ivsData = await createIvsChannel(username);
+  const newChan: ChannelDoc = {
+    channel_id: uid,
+    user_uid: uid,
+    username,
+    display_name: username,
+    photo_url: null,
+    thumbnail_url: null,
+    ivs_channel_arn: ivsData.arn,
+    stream_key: ivsData.streamKey,
+    playback_id: ivsData.playbackUrl,
+    stream_title: `${username}'s Live Stream`,
+    category: "music",
+    is_live: false,
+    viewer_count: 0,
+    record_enabled: true,
+    last_updated: new Date().toISOString(),
+    rtmp_url: ivsData.ingestEndpoint,
+  };
+  db.channels.set(uid, newChan);
+
   return {
     uid,
     username,
@@ -246,25 +281,28 @@ async function getOrCreateChannelForUser(uid: string, username: string, forceNew
 
 async function getOrRestoreUserChannel(user: UserDoc): Promise<ChannelDoc> {
   const resolved = await getOrCreateChannelForUser(user.uid, user.username);
-  const chan: ChannelDoc = {
-    channel_id: user.uid,
-    user_uid: user.uid,
-    username: user.username,
-    display_name: user.display_name || user.username,
-    photo_url: user.photo_url || null,
-    thumbnail_url: null,
-    ivs_channel_arn: resolved.ivs_channel_arn,
-    stream_key: resolved.stream_key,
-    playback_id: resolved.playback_id,
-    stream_title: `${user.display_name || user.username}'s Live Stream`,
-    category: "music",
-    is_live: false,
-    viewer_count: 0,
-    record_enabled: true,
-    last_updated: new Date().toISOString(),
-    rtmp_url: resolved.rtmp_url,
-  };
-  db.channels.set(user.uid, chan);
+  let chan = db.channels.get(user.uid);
+  if (!chan) {
+    chan = {
+      channel_id: user.uid,
+      user_uid: user.uid,
+      username: user.username,
+      display_name: user.display_name || user.username,
+      photo_url: user.photo_url || null,
+      thumbnail_url: null,
+      ivs_channel_arn: resolved.ivs_channel_arn,
+      stream_key: resolved.stream_key,
+      playback_id: resolved.playback_id,
+      stream_title: `${user.display_name || user.username}'s Live Stream`,
+      category: "music",
+      is_live: false,
+      viewer_count: 0,
+      record_enabled: true,
+      last_updated: new Date().toISOString(),
+      rtmp_url: resolved.rtmp_url,
+    };
+    db.channels.set(user.uid, chan);
+  }
   return chan;
 }
 
