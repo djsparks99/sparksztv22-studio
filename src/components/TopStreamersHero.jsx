@@ -82,8 +82,11 @@ export default function TopStreamersHero({ allChannels = [] }) {
 
   // Check channel.thumbnail_url, channel.thumbnailUrl, or channel.preview_image (or previewImage)
   const thumbnailSource = activeStreamer.thumbnail_url || activeStreamer.thumbnailUrl || activeStreamer.preview_image || activeStreamer.previewImage;
+  const photoSource = activeStreamer.photo_url || activeStreamer.photoUrl || (activeStreamer.user && (activeStreamer.user.photo_url || activeStreamer.user.photoUrl));
   const activeThumb = thumbnailSource
     ? fileUrl(thumbnailSource)
+    : photoSource
+    ? fileUrl(photoSource)
     : activeStreamer.banner_url
     ? fileUrl(activeStreamer.banner_url)
     : hashPick(activeSlug, FALLBACK_THUMBS);
