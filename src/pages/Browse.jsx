@@ -138,6 +138,34 @@ export default function Browse() {
     return () => unsubscribe();
   }, [user]);
 
+  useEffect(() => {
+    const handleChannelUpdated = (e) => {
+      const updatedChan = e.detail?.channel;
+      if (!updatedChan) return;
+      setRawChannels((prev) => {
+        return prev.map((c) => {
+          const isMatch = (
+            (c.id && c.id === updatedChan.id) ||
+            (c.username && c.username.toLowerCase() === (updatedChan.username || "").toLowerCase()) ||
+            (c.user_uid && c.user_uid === updatedChan.user_uid)
+          );
+          if (isMatch) {
+            return {
+              ...c,
+              ...updatedChan,
+              thumbnail_url: updatedChan.thumbnail_url,
+              thumbnailUrl: updatedChan.thumbnail_url,
+            };
+          }
+          return c;
+        });
+      });
+    };
+
+    window.addEventListener("channel-updated", handleChannelUpdated);
+    return () => window.removeEventListener("channel-updated", handleChannelUpdated);
+  }, []);
+
   let filteredChannels = rawChannels;
   if (followingOnly) {
     filteredChannels = filteredChannels.filter((c) =>

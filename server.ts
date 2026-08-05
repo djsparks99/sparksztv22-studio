@@ -605,9 +605,85 @@ async function startServer() {
   app.use("/api", api);
 
   const distPath = path.join(process.cwd(), "dist");
-  app.use(express.static(distPath));
-  app.get("*", (req, res) => {
-    res.sendFile(path.join(distPath, "index.html"));
+  app.use(express.static(distPath, { index: false }));
+
+  app.get("*", async (req, res, next) => {
+    if (req.path.includes(".") && !req.path.endsWith(".html")) {
+      return next();
+    }
+
+    try {
+      const indexPath = path.join(distPath, "index.html");
+      if (!fs.existsSync(indexPath)) {
+        return res.status(404).send("Application is building, please refresh in a moment.");
+      }
+
+      let html = fs.readFileSync(indexPath, "utf8");
+
+      let title = "SPARKZ.TV // Your Stream, Your Mix, Your Rules";
+      let image = `${req.protocol}://${req.get("host")}/api/files/oie_wGXIg9faI9ss.jpg`;
+      const url = `${req.protocol}://${req.get("host")}${req.originalUrl}`;
+
+      if (req.path.startsWith("/channel/")) {
+        const parts = req.path.split("/");
+        const usernameIndex = parts.indexOf("channel") + 1;
+        const rawUsername = parts[usernameIndex];
+        const normalizedId = (rawUsername || "").toLowerCase().trim();
+
+        if (normalizedId) {
+          let matchedChannel: any = null;
+          if (normalizedId === "djsparkz") {
+            matchedChannel = await getMasterChannel();
+          } else {
+            matchedChannel = db.channels.get(rawUsername) || Array.from(db.channels.values()).find(
+              (c: any) => (c.username || "").toLowerCase() === normalizedId
+            );
+          }
+
+          if (matchedChannel) {
+            title = `${matchedChannel.display_name || matchedChannel.username} // ${matchedChannel.stream_title || "Live Stream"}`;
+            if (matchedChannel.photo_url) {
+              if (matchedChannel.photo_url.startsWith("http")) {
+                image = matchedChannel.photo_url;
+              } else {
+                image = `${req.protocol}://${req.get("host")}${matchedChannel.photo_url}`;
+              }
+            } else {
+              image = `https://api.dicebear.com/7.x/bottts/svg?seed=${normalizedId}`;
+            }
+          }
+        }
+      }
+
+      const escapeHtml = (unsafe: string) => {
+        return unsafe
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#039;");
+      };
+
+      const escapedTitle = escapeHtml(title);
+      const escapedImage = escapeHtml(image);
+      const escapedUrl = escapeHtml(url);
+
+      html = html.replace(/<title>.*?<\/title>/gi, `<title>${escapedTitle}</title>`);
+      html = html.replace(/<meta\s+property="og:title"\s+content="[^"]*"\s*\/?>/gi, `<meta property="og:title" content="${escapedTitle}" />`);
+      html = html.replace(/<meta\s+name="twitter:title"\s+content="[^"]*"\s*\/?>/gi, `<meta name="twitter:title" content="${escapedTitle}" />`);
+
+      html = html.replace(/<meta\s+property="og:image"\s+content="[^"]*"\s*\/?>/gi, `<meta property="og:image" content="${escapedImage}" />`);
+      html = html.replace(/<meta\s+name="twitter:image"\s+content="[^"]*"\s*\/?>/gi, `<meta name="twitter:image" content="${escapedImage}" />`);
+
+      html = html.replace(/<meta\s+property="og:url"\s+content="[^"]*"\s*\/?>/gi, `<meta property="og:url" content="${escapedUrl}" />`);
+      html = html.replace(/<meta\s+name="twitter:url"\s+content="[^"]*"\s*\/?>/gi, `<meta name="twitter:url" content="${escapedUrl}" />`);
+
+      res.setHeader("Content-Type", "text/html");
+      return res.send(html);
+    } catch (err: any) {
+      console.error("[SEO Middleware Error]:", err);
+      return res.sendFile(path.join(distPath, "index.html"));
+    }
   });
 
   const CHAT_COLORS = [

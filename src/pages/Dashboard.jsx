@@ -133,10 +133,12 @@ export default function Dashboard() {
         updateUserProfileInFirestore(user.uid, { thumbnail_url: channel?.thumbnail_url || null }).catch(() => {});
       }
 
-      setChannel((prev) => ({
-        ...(prev || {}),
+      const updatedChannel = {
+        ...(channel || {}),
         ...data,
-      }));
+      };
+      setChannel(updatedChannel);
+      window.dispatchEvent(new CustomEvent("channel-updated", { detail: { channel: updatedChannel } }));
       toast.success("Channel updated.");
     } catch (e) {
       console.error("Save channel error:", e);
@@ -537,6 +539,7 @@ function ThumbnailUploader({ channel, onChange }) {
         filename: file.name
       });
       onChange?.({ ...channel, thumbnail_url: data.thumbnail_url });
+      window.dispatchEvent(new CustomEvent("channel-updated", { detail: { channel: { ...channel, thumbnail_url: data.thumbnail_url } } }));
       if (user?.uid) {
         updateUserProfileInFirestore(user.uid, { thumbnail_url: data.thumbnail_url }, channel?.username || user?.username).catch(() => {});
       }
@@ -555,6 +558,7 @@ function ThumbnailUploader({ channel, onChange }) {
     try {
       await api.delete("/channels/mine/thumbnail");
       onChange?.({ ...channel, thumbnail_url: null });
+      window.dispatchEvent(new CustomEvent("channel-updated", { detail: { channel: { ...channel, thumbnail_url: null } } }));
       if (user?.uid) {
         updateUserProfileInFirestore(user.uid, { thumbnail_url: null }).catch(() => {});
       }
