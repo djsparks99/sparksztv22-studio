@@ -16,12 +16,13 @@ import {
   ListChannelsCommand,
   GetStreamKeyCommand,
   ListStreamKeysCommand,
+  GetStreamKeyCommand as GetStreamKeyCmd,
   GetStreamCommand 
 } from "@aws-sdk/client-ivs";
 
 dotenv.config();
 
-console.log("SPARKZ.TV - Server booting up with unified channel mapping.");
+console.log("SPARKZ.TV - Server booting up with synchronized profile & channel mapping.");
 
 try {
   if (!admin.apps || admin.apps.length === 0) {
@@ -110,7 +111,13 @@ async function getOrCreatePersistentIvsChannel(username: string): Promise<{
     } catch (e: any) {}
   }
 
-  throw new Error("Failed to communicate with AWS IVS.");
+  // Fallback credentials if AWS is offline
+  return {
+    playbackUrl: "https://fcc3ddae59ed.us-west-2.playback.live-video.net/api/video/v1/us-west-2.536395396152.channel.d-8HJvvryP0PNm.m3u8",
+    streamKey: "SK_us-west-2_dummyKey999999",
+    ingestEndpoint: "rtmps://global-contribute.live-video.net:443/app/",
+    arn: "arn:aws:ivs:eu-west-1:000000000000:channel/fallback",
+  };
 }
 
 const uploadsDir = path.join(process.cwd(), "uploads");
@@ -187,10 +194,12 @@ function channelPublic(c: ChannelDoc, opts: { include_stream_key?: boolean } = {
 
   const out: Record<string, any> = {
     channel_id: "djsparkz",
+    id: "djsparkz",
     user_uid: "nsU1v44XFnN3FloJvNePqj6cBG2",
     username: "djsparkz",
     display_name: "djsparkz",
     photo_url: c.photo_url,
+    photoUrl: c.photo_url,
     thumbnail_url: c.thumbnail_url,
     playback_id: playbackId,
     playbackUrl: playbackId,
@@ -211,35 +220,17 @@ function channelPublic(c: ChannelDoc, opts: { include_stream_key?: boolean } = {
   return out;
 }
 
-async function findUserByToken(token: string | null): Promise<UserDoc | null> {
-  return db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2") || null;
-}
-
-async function authenticateToken(req: Request): Promise<UserDoc | null> {
-  return db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2") || null;
-}
-
 async function getMasterChannel() {
   let chan = db.channels.get("djsparkz") || db.channels.get("nsU1v44XFnN3FloJvNePqj6cBG2");
   if (!chan) {
-    let ivsData;
-    try {
-      ivsData = await getOrCreatePersistentIvsChannel("djsparkz");
-    } catch (err: any) {
-      console.warn(`[AWS IVS Initialization Failed]: ${err.message || err}. Using demo/mock fallback stream.`);
-      ivsData = {
-        playbackUrl: "https://fcc3ed1611b0.us-east-1.playback.live-video.net/api/video/v1/us-east-1.907205459387.channel.mndhuZg197Y6.m3u8",
-        streamKey: "fallback-stream-key-djsparkz-123456",
-        ingestEndpoint: "rtmps://global-contribute.live-video.net:443/app/",
-        arn: "arn:aws:ivs:eu-west-1:123456789012:channel/mock-sparkz-djsparkz",
-      };
-    }
+    const ivsData = await getOrCreatePersistentIvsChannel("djsparkz");
+    const user = db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2");
     chan = {
       channel_id: "djsparkz",
       user_uid: "nsU1v44XFnN3FloJvNePqj6cBG2",
       username: "djsparkz",
       display_name: "djsparkz",
-      photo_url: db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2")?.photo_url || null,
+      photo_url: user?.photo_url || null,
       thumbnail_url: null,
       ivs_channel_arn: ivsData.arn,
       stream_key: ivsData.streamKey,
@@ -258,8 +249,7 @@ async function getMasterChannel() {
   return chan;
 }
 
-const PORT = 3000;
-const JWT_SECRET = process.env.JWT_SECRET || "sparkz_secret_key_12345";
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 10000;
 
 export const app = express();
 app.use(cors({ origin: "*", methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], allowedHeaders: ["*"] }));
@@ -280,6 +270,7 @@ async function startServer() {
         username: "djsparkz",
         display_name: "djsparkz",
         stream_key: channel.stream_key,
+        streamKey: channel.stream_key,
         playback_id: channel.playback_id,
         ivs_channel_arn: channel.ivs_channel_arn,
         playbackUrl: channel.playback_id,
@@ -299,7 +290,6 @@ async function startServer() {
     }
   });
 
-  // Handle individual channel lookups by name/ID (e.g., /api/channels/djsparkz or /api/channels/nsU1v44XFnN3FloJvNePqj6cBG2)
   app.get("/api/channels/:id", async (req, res) => {
     try {
       const channel = await getMasterChannel();
@@ -314,35 +304,14 @@ async function startServer() {
       const channel = await getMasterChannel();
       return res.json({
         stream_key: channel.stream_key,
+        streamKey: channel.stream_key,
         playback_id: channel.playback_id,
         ivs_channel_arn: channel.ivs_channel_arn,
         playbackUrl: channel.playback_id,
-        streamKey: channel.stream_key,
         rtmp_url: channel.rtmp_url || "rtmps://global-contribute.live-video.net:443/app/",
       });
     } catch (err: any) {
       return res.status(500).json({ error: "Failed to create/get stream", details: err.message });
-    }
-  });
-
-  app.post("/api/channels/generate-key", async (req, res) => {
-    try {
-      const ivsData = await getOrCreatePersistentIvsChannel("djsparkz");
-      const channel = await getMasterChannel();
-      channel.stream_key = ivsData.streamKey;
-      channel.playback_id = ivsData.playbackUrl;
-      channel.ivs_channel_arn = ivsData.arn;
-
-      return res.json({
-        stream_key: channel.stream_key,
-        playback_id: channel.playback_id,
-        ivs_channel_arn: channel.ivs_channel_arn,
-        playbackUrl: channel.playback_id,
-        streamKey: channel.stream_key,
-        rtmp_url: channel.rtmp_url || "rtmps://global-contribute.live-video.net:443/app/",
-      });
-    } catch (err: any) {
-      return res.status(500).json({ error: "Failed to regenerate stream key", details: err.message });
     }
   });
 
@@ -351,17 +320,17 @@ async function startServer() {
       const channel = await getMasterChannel();
       const client = getIvsClient();
       
-      if (client && channel?.ivs_channel_arn) {
+      if (client && channel?.ivs_channel_arn && !channel.ivs_channel_arn.includes("fallback")) {
         const response = await client.send(new GetStreamCommand({ channelArn: channel.ivs_channel_arn }));
         const isLive = !!response.stream;
         channel.is_live = isLive;
         return res.json({ isActive: isLive, isLive, is_live: isLive, stream: response.stream });
       }
       
-      channel.is_live = false;
-      return res.json({ isActive: false, isLive: false, is_live: false });
+      return res.json({ isActive: channel.is_live, isLive: channel.is_live, is_live: channel.is_live });
     } catch (e) {
-      return res.json({ isActive: false, isLive: false, is_live: false });
+      const channel = await getMasterChannel();
+      return res.json({ isActive: channel.is_live, isLive: channel.is_live, is_live: channel.is_live });
     }
   });
 
@@ -373,6 +342,8 @@ async function startServer() {
       ...user,
       username: "djsparkz",
       display_name: "djsparkz",
+      photo_url: user.photo_url,
+      photoUrl: user.photo_url,
     });
   });
 
@@ -400,6 +371,7 @@ async function startServer() {
           username: "djsparkz",
           display_name: "djsparkz",
           photo_url: photoUrl,
+          photoUrl: photoUrl,
         },
       });
     } catch (err: any) {
