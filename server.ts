@@ -10,7 +10,6 @@ import bcrypt from "bcryptjs";
 import multer from "multer";
 import admin from "firebase-admin";
 import { getAuth } from "firebase-admin/auth";
-import { getFirestore } from "firebase-admin/firestore";
 import { WebSocketServer, WebSocket as WSWebSocket } from "ws";
 
 import { 
@@ -23,26 +22,6 @@ import {
 } from "@aws-sdk/client-ivs";
 
 dotenv.config();
-
-let firestoreDatabaseId: string | undefined = undefined;
-try {
-  const configPath = path.join(process.cwd(), "firebase-applet-config.json");
-  if (fs.existsSync(configPath)) {
-    const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-    if (config.firestoreDatabaseId) {
-      firestoreDatabaseId = config.firestoreDatabaseId;
-    }
-  }
-} catch (e) {
-  console.warn("Failed to read firebase-applet-config.json:", e);
-}
-
-function getFirestoreDb() {
-  if (firestoreDatabaseId) {
-    return getFirestore(firestoreDatabaseId);
-  }
-  return getFirestore();
-}
 
 console.log("SPARKZ.TV - Server booting up with universal avatar sync.");
 
@@ -286,66 +265,6 @@ function channelPublic(c: ChannelDoc, opts: { include_stream_key?: boolean } = {
 async function getMasterChannel() {
   let chan = db.channels.get("djsparkz") || db.channels.get("nsU1v44XFnN3FloJvNePqj6cBG2");
   const user = db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2")!;
-  
-  try {
-    const dbFirestore = getFirestoreDb();
-    
-    const fetchFromFirestore = async () => {
-      const userSnap = await dbFirestore.collection("users").doc("nsU1v44XFnN3FloJvNePqj6cBG2").get();
-      if (userSnap.exists) {
-        const data = userSnap.data();
-        if (data) {
-          if (data.photo_url !== undefined) user.photo_url = data.photo_url;
-          if (data.display_name !== undefined) user.display_name = data.display_name;
-          if (data.bio !== undefined) user.bio = data.bio;
-        }
-      }
-      
-      const channelSnap = await dbFirestore.collection("channels").doc("djsparkz").get();
-      if (channelSnap.exists) {
-        const data = channelSnap.data();
-        if (data) {
-          if (chan) {
-            if (data.photo_url !== undefined) chan.photo_url = data.photo_url;
-            if (data.thumbnail_url !== undefined) chan.thumbnail_url = data.thumbnail_url;
-            if (data.display_name !== undefined) chan.display_name = data.display_name;
-            if (data.stream_title !== undefined) chan.stream_title = data.stream_title;
-            if (data.category !== undefined) chan.category = data.category;
-            if (data.schedule !== undefined) (chan as any).schedule = data.schedule;
-            if (data.is_live !== undefined) chan.is_live = Boolean(data.is_live);
-            if (data.viewer_count !== undefined) chan.viewer_count = Number(data.viewer_count);
-          }
-        }
-      } else {
-        const channelSnapUid = await dbFirestore.collection("channels").doc("nsU1v44XFnN3FloJvNePqj6cBG2").get();
-        if (channelSnapUid.exists) {
-          const data = channelSnapUid.data();
-          if (data) {
-            if (chan) {
-              if (data.photo_url !== undefined) chan.photo_url = data.photo_url;
-              if (data.thumbnail_url !== undefined) chan.thumbnail_url = data.thumbnail_url;
-              if (data.display_name !== undefined) chan.display_name = data.display_name;
-              if (data.stream_title !== undefined) chan.stream_title = data.stream_title;
-              if (data.category !== undefined) chan.category = data.category;
-              if (data.schedule !== undefined) (chan as any).schedule = data.schedule;
-              if (data.is_live !== undefined) chan.is_live = Boolean(data.is_live);
-              if (data.viewer_count !== undefined) chan.viewer_count = Number(data.viewer_count);
-            }
-          }
-        }
-      }
-    };
-
-    await Promise.race([
-      fetchFromFirestore(),
-      new Promise<void>((resolve) => setTimeout(() => {
-        console.warn("[Firestore Sync] Timeout reached (2000ms). Falling back to cached memory data.");
-        resolve();
-      }, 2000))
-    ]);
-  } catch (err: any) {
-    console.warn("[Firestore getMasterChannel sync notice]:", err.message);
-  }
 
   if (!chan) {
     const ivsData = await getOrCreatePersistentIvsChannel("djsparkz");
@@ -375,7 +294,7 @@ async function getMasterChannel() {
   return chan;
 }
 
-const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 10000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 export const app = express();
 app.use(cors({ origin: "*", methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], allowedHeaders: ["*"] }));
@@ -422,52 +341,22 @@ async function startServer() {
         seenUids.add(masterChannel.user_uid);
       }
 
-      try {
-        const dbFirestore = getFirestoreDb();
-        const snapshot = await dbFirestore.collection("channels").get();
-        
-        snapshot.forEach((doc) => {
-          const docId = doc.id;
-          const data = doc.data();
-          if (!data) return;
+      for (const cDoc of db.channels.values()) {
+        const username = (cDoc.username || "").toLowerCase().trim();
+        const userUid = (cDoc.user_uid || cDoc.channel_id || "").trim();
 
-          const username = (data.username || "").toLowerCase().trim();
-          const userUid = (data.user_uid || docId || "").trim();
+        if (!username || username === "undefined" || username === "null") continue;
+        if (username === "djsparkz" || userUid === "nsU1v44XFnN3FloJvNePqj6cBG2") continue;
 
-          if (!username || username === "undefined" || username === "null") return;
-          if (username === "djsparkz" || userUid === "nsU1v44XFnN3FloJvNePqj6cBG2") return;
+        if (isDummyOrInvalid(cDoc)) continue;
+        if (seenUsernames.has(username) || seenUids.has(userUid)) continue;
 
-          const cDoc: ChannelDoc = {
-            channel_id: docId,
-            user_uid: userUid,
-            username: data.username || docId,
-            display_name: data.display_name || data.username || docId,
-            photo_url: data.photo_url || null,
-            thumbnail_url: data.thumbnail_url || null,
-            ivs_channel_arn: data.ivs_channel_arn || "",
-            stream_key: data.stream_key || "",
-            playback_id: data.playback_id || data.playback_url || data.playbackUrl || "",
-            stream_title: data.stream_title || `${data.display_name || data.username || docId}'s Live Stream`,
-            category: data.category || "music",
-            is_live: Boolean(data.is_live || data.isLive),
-            viewer_count: Number(data.viewer_count || 0),
-            record_enabled: Boolean(data.record_enabled !== false),
-            last_updated: data.last_updated || new Date().toISOString(),
-            rtmp_url: data.rtmp_url || "",
-          };
+        seenUsernames.add(username);
+        if (userUid) {
+          seenUids.add(userUid);
+        }
 
-          if (isDummyOrInvalid(cDoc)) return;
-          if (seenUsernames.has(username) || seenUids.has(userUid)) return;
-
-          seenUsernames.add(username);
-          if (userUid) {
-            seenUids.add(userUid);
-          }
-
-          channelsList.push(channelPublic(cDoc));
-        });
-      } catch (fsErr: any) {
-        console.warn("[Firestore channels list sync warning]:", fsErr.message);
+        channelsList.push(channelPublic(cDoc));
       }
 
       return res.json(channelsList);
@@ -486,51 +375,12 @@ async function startServer() {
         return res.json(channelPublic(channel, { include_stream_key: true }));
       }
 
-      try {
-        const dbFirestore = getFirestoreDb();
-        let docSnap = await dbFirestore.collection("channels").doc(requestedId).get();
-        if (!docSnap.exists) {
-          const querySnap = await dbFirestore.collection("channels")
-            .where("username", "==", requestedId)
-            .limit(1)
-            .get();
-          if (!querySnap.empty) {
-            docSnap = querySnap.docs[0];
-          }
-        }
+      const channelInMem = db.channels.get(requestedId) || Array.from(db.channels.values()).find(
+        (c) => (c.username || "").toLowerCase() === normalizedId
+      );
 
-        if (docSnap.exists) {
-          const data = docSnap.data();
-          if (data) {
-            const userUid = data.user_uid || docSnap.id || "";
-            const username = data.username || docSnap.id || "";
-
-            const cDoc: ChannelDoc = {
-              channel_id: docSnap.id,
-              user_uid: userUid,
-              username: username,
-              display_name: data.display_name || username,
-              photo_url: data.photo_url || null,
-              thumbnail_url: data.thumbnail_url || null,
-              ivs_channel_arn: data.ivs_channel_arn || "",
-              stream_key: data.stream_key || "",
-              playback_id: data.playback_id || data.playback_url || data.playbackUrl || "",
-              stream_title: data.stream_title || `${data.display_name || username}'s Live Stream`,
-              category: data.category || "music",
-              is_live: Boolean(data.is_live || data.isLive),
-              viewer_count: Number(data.viewer_count || 0),
-              record_enabled: Boolean(data.record_enabled !== false),
-              last_updated: data.last_updated || new Date().toISOString(),
-              rtmp_url: data.rtmp_url || "",
-            };
-
-            if (!isDummyOrInvalid(cDoc)) {
-              return res.json(channelPublic(cDoc, { include_stream_key: true }));
-            }
-          }
-        }
-      } catch (fsErr: any) {
-        console.warn("[Firestore single channel fetch warning]:", fsErr.message);
+      if (channelInMem && !isDummyOrInvalid(channelInMem)) {
+        return res.json(channelPublic(channelInMem, { include_stream_key: true }));
       }
 
       const channel = await getMasterChannel();
@@ -595,32 +445,14 @@ async function startServer() {
   const handleUserUpdate = async (req: Request, res: Response) => {
     try {
       const user = db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2")!;
-      const userUpdates: any = {};
-      const channelUpdates: any = {};
 
       if (req.body?.display_name !== undefined) {
         user.display_name = req.body.display_name;
         const channel = await getMasterChannel();
         channel.display_name = req.body.display_name;
-        userUpdates.display_name = req.body.display_name;
-        channelUpdates.display_name = req.body.display_name;
       }
       if (req.body?.bio !== undefined) {
         user.bio = req.body.bio;
-        userUpdates.bio = req.body.bio;
-      }
-
-      try {
-        const dbFirestore = getFirestoreDb();
-        if (Object.keys(userUpdates).length > 0) {
-          await dbFirestore.collection("users").doc("nsU1v44XFnN3FloJvNePqj6cBG2").set(userUpdates, { merge: true });
-        }
-        if (Object.keys(channelUpdates).length > 0) {
-          await dbFirestore.collection("channels").doc("djsparkz").set(channelUpdates, { merge: true });
-          await dbFirestore.collection("channels").doc("nsU1v44XFnN3FloJvNePqj6cBG2").set(channelUpdates, { merge: true });
-        }
-      } catch (firestoreErr: any) {
-        console.warn("[Firestore user sync error]:", firestoreErr.message);
       }
 
       return res.json({
@@ -644,36 +476,21 @@ async function startServer() {
   const handleChannelUpdate = async (req: Request, res: Response) => {
     try {
       const channel = await getMasterChannel();
-      const updates: any = {};
 
       if (req.body?.stream_title !== undefined) {
         channel.stream_title = req.body.stream_title;
-        updates.stream_title = req.body.stream_title;
       }
       if (req.body?.category !== undefined) {
         if (typeof req.body.category !== "string") {
           return res.status(400).json({ error: "Category must be a string" });
         }
         channel.category = req.body.category;
-        updates.category = req.body.category;
       }
       if (req.body?.schedule !== undefined) {
         (channel as any).schedule = req.body.schedule;
-        updates.schedule = req.body.schedule;
       }
       if (req.body?.thumbnail_url !== undefined) {
         channel.thumbnail_url = req.body.thumbnail_url;
-        updates.thumbnail_url = req.body.thumbnail_url;
-      }
-
-      try {
-        const dbFirestore = getFirestoreDb();
-        if (Object.keys(updates).length > 0) {
-          await dbFirestore.collection("channels").doc("djsparkz").set(updates, { merge: true });
-          await dbFirestore.collection("channels").doc("nsU1v44XFnN3FloJvNePqj6cBG2").set(updates, { merge: true });
-        }
-      } catch (firestoreErr: any) {
-        console.warn("[Firestore channel update sync error]:", firestoreErr.message);
       }
       
       return res.json(channelPublic(channel, { include_stream_key: true }));
@@ -726,21 +543,6 @@ async function startServer() {
       const channel = await getMasterChannel();
       channel.photo_url = photoUrl;
 
-      try {
-        const dbFirestore = getFirestoreDb();
-        await dbFirestore.collection("users").doc("nsU1v44XFnN3FloJvNePqj6cBG2").set({
-          photo_url: photoUrl
-        }, { merge: true });
-        await dbFirestore.collection("channels").doc("djsparkz").set({
-          photo_url: photoUrl
-        }, { merge: true });
-        await dbFirestore.collection("channels").doc("nsU1v44XFnN3FloJvNePqj6cBG2").set({
-          photo_url: photoUrl
-        }, { merge: true });
-      } catch (firestoreErr: any) {
-        console.warn("[Firestore photo sync error]:", firestoreErr.message);
-      }
-
       return res.json({
         success: true,
         photo_url: photoUrl,
@@ -778,18 +580,6 @@ async function startServer() {
 
       channel.thumbnail_url = thumbnailUrl;
 
-      try {
-        const dbFirestore = getFirestoreDb();
-        await dbFirestore.collection("channels").doc("djsparkz").set({
-          thumbnail_url: thumbnailUrl
-        }, { merge: true });
-        await dbFirestore.collection("channels").doc("nsU1v44XFnN3FloJvNePqj6cBG2").set({
-          thumbnail_url: thumbnailUrl
-        }, { merge: true });
-      } catch (firestoreErr: any) {
-        console.warn("[Firestore thumbnail sync error]:", firestoreErr.message);
-      }
-
       return res.json({
         success: true,
         thumbnail_url: thumbnailUrl,
@@ -804,18 +594,6 @@ async function startServer() {
     try {
       const channel = await getMasterChannel();
       channel.thumbnail_url = null;
-
-      try {
-        const dbFirestore = getFirestoreDb();
-        await dbFirestore.collection("channels").doc("djsparkz").set({
-          thumbnail_url: null
-        }, { merge: true });
-        await dbFirestore.collection("channels").doc("nsU1v44XFnN3FloJvNePqj6cBG2").set({
-          thumbnail_url: null
-        }, { merge: true });
-      } catch (firestoreErr: any) {
-        console.warn("[Firestore thumbnail delete sync error]:", firestoreErr.message);
-      }
 
       return res.json({ success: true });
     } catch (err: any) {
@@ -888,25 +666,28 @@ async function startServer() {
           const decodedToken = await getAuth().verifyIdToken(token);
           uid = decodedToken.uid;
           
-          const dbFirestore = getFirestoreDb();
-          const userSnap = await dbFirestore.collection("users").doc(uid).get();
-          if (userSnap.exists) {
-            const data = userSnap.data();
-            if (data) {
-              username = data.username || data.display_name || "User";
-              displayName = data.display_name || username;
-              photoUrl = data.photo_url || null;
-              wattsVal = typeof data.watts === "number" ? data.watts : 100;
-            }
-          } else {
-            const localUser = db.users.get(uid);
-            if (localUser) {
-              username = localUser.username;
-              displayName = localUser.display_name;
-              photoUrl = localUser.photo_url;
-              wattsVal = typeof localUser.watts === "number" ? localUser.watts : 100;
-            }
+          let localUser = db.users.get(uid);
+          if (!localUser) {
+            const nameFromToken = decodedToken.name || decodedToken.email || "User";
+            const emailFromToken = decodedToken.email || "";
+            localUser = {
+              uid,
+              email: emailFromToken,
+              username: emailFromToken.split("@")[0] || nameFromToken,
+              display_name: nameFromToken,
+              photo_url: decodedToken.picture || null,
+              bio: "",
+              password_hash: "",
+              created_at: new Date().toISOString(),
+              watts: 100,
+            };
+            db.users.set(uid, localUser);
           }
+
+          username = localUser.username;
+          displayName = localUser.display_name;
+          photoUrl = localUser.photo_url;
+          wattsVal = typeof localUser.watts === "number" ? localUser.watts : 100;
 
           badges = [];
           if (username === roomName) {
@@ -977,10 +758,6 @@ async function startServer() {
 
             if (isHighlighted) {
               wattsVal = Math.max(0, wattsVal - 50);
-              try {
-                const dbFirestore = getFirestoreDb();
-                await dbFirestore.collection("users").doc(client.uid).update({ watts: wattsVal });
-              } catch (e) {}
               const localUser = db.users.get(client.uid);
               if (localUser) {
                 localUser.watts = wattsVal;
