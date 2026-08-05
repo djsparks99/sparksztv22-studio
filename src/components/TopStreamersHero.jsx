@@ -93,12 +93,11 @@ export default function TopStreamersHero({ allChannels = [] }) {
     (user.username && user.username.toLowerCase() === activeSlug.toLowerCase())
   );
 
-  // Dynamically render channel.photo_url or user.photo_url with high quality robotic fallback
+  // Avatar Force-Override: Explicitly check and render channel.photo_url or user.photo_url, bypassing hardcoded default user icons.
   const avatarUrl = activeStreamer.photo_url || 
                     activeStreamer.photoUrl || 
-                    (isMe && (user.photo_url || user.photoUrl)) ||
-                    activeStreamer.user_photo_url || 
                     (activeStreamer.user && (activeStreamer.user.photo_url || activeStreamer.user.photoUrl)) ||
+                    (isMe && (user?.photo_url || user?.photoUrl)) ||
                     `https://api.dicebear.com/7.x/bottts/svg?seed=${activeSlug}`;
 
   const totalLiveViewers = liveChannels.reduce(
@@ -228,18 +227,15 @@ export default function TopStreamersHero({ allChannels = [] }) {
               <div className="p-4 sm:p-5">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-3.5 min-w-0">
-                    {avatarUrl ? (
-                      <img
-                        src={fileUrl(avatarUrl)}
-                        alt=""
-                        className="h-11 w-11 shrink-0 border-2 border-[#e5ff00] object-cover"
-                        referrerPolicy="no-referrer"
-                      />
-                    ) : (
-                      <div className="flex h-11 w-11 shrink-0 items-center justify-center border-2 border-[#e5ff00] bg-black text-[#e5ff00]">
-                        <User className="h-5 w-5" />
-                      </div>
-                    )}
+                    <img
+                      src={fileUrl(avatarUrl)}
+                      alt={activeStreamer.display_name || activeSlug}
+                      className="h-11 w-11 shrink-0 border-2 border-[#e5ff00] object-cover bg-black"
+                      referrerPolicy="no-referrer"
+                      onError={(e) => {
+                        e.target.src = `https://api.dicebear.com/7.x/bottts/svg?seed=${activeSlug}`;
+                      }}
+                    />
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 truncate">
                         <h2 className="font-display text-xl font-black text-white truncate">
