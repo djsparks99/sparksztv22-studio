@@ -21,7 +21,7 @@ import {
 
 dotenv.config();
 
-console.log("SPARKZ.TV - Server booting up with full UI branding & persistent sync.");
+console.log("SPARKZ.TV - Server booting up with universal avatar sync.");
 
 try {
   if (!admin.apps || admin.apps.length === 0) {
@@ -200,6 +200,8 @@ function channelPublic(c: ChannelDoc, opts: { include_stream_key?: boolean } = {
     display_name: "djsparkz",
     photo_url: activePhoto,
     photoUrl: activePhoto,
+    avatar: activePhoto,
+    avatar_url: activePhoto,
     thumbnail_url: activePhoto,
     playback_id: playbackId,
     playbackUrl: playbackId,
@@ -347,6 +349,8 @@ async function startServer() {
       display_name: "djsparkz",
       photo_url: user.photo_url,
       photoUrl: user.photo_url,
+      avatar: user.photo_url,
+      avatar_url: user.photo_url,
     });
   });
 
@@ -357,8 +361,8 @@ async function startServer() {
 
       if (req.file) {
         photoUrl = `/api/files/${req.file.filename}`;
-      } else if (req.body?.photo_url || req.body?.photoUrl || req.body?.photo) {
-        photoUrl = req.body.photo_url || req.body.photoUrl || req.body.photo;
+      } else if (req.body?.photo_url || req.body?.photoUrl || req.body?.photo || req.body?.avatar) {
+        photoUrl = req.body.photo_url || req.body.photoUrl || req.body.photo || req.body.avatar;
       }
 
       user.photo_url = photoUrl;
@@ -369,12 +373,16 @@ async function startServer() {
         success: true,
         photo_url: photoUrl,
         photoUrl: photoUrl,
+        avatar: photoUrl,
+        avatar_url: photoUrl,
         user: {
           ...user,
           username: "djsparkz",
           display_name: "djsparkz",
           photo_url: photoUrl,
           photoUrl: photoUrl,
+          avatar: photoUrl,
+          avatar_url: photoUrl,
         },
       });
     } catch (err: any) {
