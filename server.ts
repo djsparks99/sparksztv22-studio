@@ -12,31 +12,25 @@ import { WebSocketServer, WebSocket } from "ws";
 import admin from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
 
-import { IvsClient, CreateChannelCommand, GetStreamCommand } from "@aws-sdk/client-ivs";
+import { 
+  IvsClient, 
+  CreateChannelCommand, 
+  GetStreamCommand, 
+  ListChannelsCommand, 
+  ListStreamKeysCommand 
+} from "@aws-sdk/client-ivs";
 
 dotenv.config();
 
-console.log("SPARKZ.TV - Server booting up with latest deployment environment parameters.");
+console.log("SPARKZ.TV - Server booting up with live AWS IVS sync.");
 
 try {
   if (!admin.apps || admin.apps.length === 0) {
     admin.initializeApp({
       projectId: process.env.FIREBASE_PROJECT_ID || "ai-studio-applet-webapp-400d5",
     });
-    console.log("[Firebase Admin] Initialized successfully.");
   }
-} catch (e: any) {
-  console.warn("[Firebase Admin] Running in standalone mode:", e.message);
-}
-
-function getDbFs() {
-  try {
-    if (admin.apps && admin.apps.length > 0) {
-      return getFirestore();
-    }
-  } catch (e) {}
-  return null;
-}
+} catch (e: any) {}
 
 let ivsClient: IvsClient | null = null;
 function getIvsClient() {
@@ -56,44 +50,81 @@ function getIvsClient() {
   return ivsClient;
 }
 
-async function createIvsChannel(name: string): Promise<{
+async function getOrCreateIvsChannelDetails(username: string): Promise<{
   playbackUrl: string;
   streamKey: string;
   ingestEndpoint: string;
   arn: string;
 }> {
   const client = getIvsClient();
+  const safeName = username.replace(/[^a-zA-Z0-9-_]/g, "-");
+
   if (client) {
     try {
-      console.log(`[AWS IVS] Calling CreateChannelCommand for stream name "${name}"...`);
-      const command = new CreateChannelCommand({
-        name: name.replace(/[^a-zA-Z0-9-_]/g, "-"),
-        latencyMode: "LOW",
-        type: "STANDARD",
-      });
-      const response = await client.send(command);
-      const playbackUrl = response.channel?.playbackUrl || "";
-      const streamKey = response.streamKey?.value || "";
-      const ingestEndpoint = response.channel?.ingestEndpoint || "rtmps://global-ingest.live-video.net:443/app/";
-      const arn = response.channel?.arn || "";
-      
-      if (playbackUrl && streamKey) {
-        return { playbackUrl, streamKey, ingestEndpoint, arn };
+      // 1. Check if channel already exists in AWS to avoid recreating duplicates
+      const listCmd = new ListChannelsCommand({});
+      const listRes = await client.send(listCmd);
+      const existingChannel = listRes.channels?.find(c => c.name === safeName);
+
+      let channelArn = existingChannel?.arn;
+      let playbackUrl = existingChannel?.playbackUrl;
+      let ingestEndpoint = existingChannel?.ingestEndpoint || "rtmps://global-contribute.live-video.net:443/app/";
+
+      if (!channelArn) {
+        console.log(`[AWS IVS] Creating new channel for "${safeName}"...`);
+        const createCmd = new CreateChannelCommand({
+          name: safeName,
+          latencyMode: "LOW",
+          type: "STANDARD",
+        });
+        const createRes = await client.send(createCmd);
+        channelArn = createRes.channel?.arn;
+        playbackUrl = createRes.channel?.playbackUrl;
+        ingestEndpoint = createRes.channel?.ingestEndpoint || ingestEndpoint;
+      }
+
+      if (channelArn) {
+        // 2. Fetch the actual active stream key for this channel from AWS
+        const keysCmd = new ListStreamKeysCommand({ channelArn });
+        const keysRes = await client.send(keysCmd);
+        let streamKeyVal = "";
+
+        if (keysRes.streamKeys && keysRes.streamKeys.length > 0) {
+          const keySummary = keysRes.streamKeys[0];
+          // If we only have the summary ARN, we use it or query it, but ListStreamKeys returns summaries
+          // Let's grab the stream key value using GetStreamKey if needed, or use summary value if present
+          streamKeyVal = keySummary.arn || "";
+        }
+
+        // To get the actual secret stream key string value from AWS IVS:
+        if (keysRes.streamKeys && keysRes.streamKeys.length > 0) {
+          const { GetStreamKeyCommand } = await import("@aws-sdk/client-ivs");
+          const getKeyDetail = await client.send(new GetStreamKeyCommand({ arn: keysRes.streamKeys[0].arn }));
+          streamKeyVal = getKeyDetail.streamKey?.value || "";
+        }
+
+        if (playbackUrl && streamKeyVal) {
+          console.log("[AWS IVS] Successfully synced live channel credentials from AWS.");
+          return {
+            playbackUrl,
+            streamKey: streamKeyVal,
+            ingestEndpoint: `rtmps://${ingestEndpoint.replace(/^rtmps?:\/\//, "").replace(/\/app\/?$/, "")}/app/`,
+            arn: channelArn,
+          };
+        }
       }
     } catch (e: any) {
-      console.warn("[AWS IVS] CreateChannelCommand returned error. Using stable simulator profile:", e.message || e);
+      console.warn("[AWS IVS API Error]:", e.message || e);
     }
   }
 
-  // Stable static mock identifiers based on username so they never shift on reload
-  const hash = crypto.createHash("md5").update(name).digest("hex");
-  const randId = hash.substring(0, 12);
-  const channelId = hash.substring(12, 24);
+  // Fallback simulator if AWS call fails
+  const hash = crypto.createHash("md5").update(username).digest("hex");
   return {
-    playbackUrl: `https://${randId}.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.${channelId}.m3u8`,
-    streamKey: `sk_us-east-1_${channelId}_${hash}`,
-    ingestEndpoint: `rtmps://${randId}.global-ingest.live-video.net:443/app/`,
-    arn: `arn:aws:ivs:us-east-1:123456789012:channel/${channelId}`,
+    playbackUrl: `https://${hash.substring(0, 12)}.eu-west-1.playback.live-video.net/api/video/v1/eu-west-1.123456789012.channel.${hash.substring(12, 24)}.m3u8`,
+    streamKey: `sk_eu-west-1_${username}_fallbackkey`,
+    ingestEndpoint: "rtmps://global-contribute.live-video.net:443/app/",
+    arn: `arn:aws:ivs:eu-west-1:123456789012:channel/${username}`,
   };
 }
 
@@ -154,26 +185,7 @@ class InMemStore {
       created_at: now,
       watts: 2500,
     };
-    const djsparkzChannel: ChannelDoc = {
-      channel_id: "nsU1v44XFnN3FloJvNePqj6cBG2",
-      user_uid: "nsU1v44XFnN3FloJvNePqj6cBG2",
-      username: "djsparkz",
-      display_name: "djsparkz",
-      photo_url: null,
-      thumbnail_url: null,
-      ivs_channel_arn: "arn:aws:ivs:us-east-1:123456789012:channel/djsparkzstatic",
-      stream_key: "sk_us-east-1_djsparkzstatic_permanentkey99",
-      playback_id: "https://djsparkz.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.djsparkzstatic.m3u8",
-      stream_title: "djsparkz's Live Stream",
-      category: "music",
-      is_live: false,
-      viewer_count: 0,
-      record_enabled: true,
-      last_updated: now,
-      rtmp_url: "rtmps://global-ingest.live-video.net:443/app/",
-    };
     this.users.set(djsparkzUser.uid, djsparkzUser);
-    this.channels.set(djsparkzChannel.channel_id, djsparkzChannel);
   }
 }
 
@@ -203,7 +215,7 @@ function channelPublic(c: ChannelDoc, opts: { include_stream_key?: boolean } = {
   if (opts.include_stream_key) {
     out.stream_key = c.stream_key || "";
     out.streamKey = c.stream_key || "";
-    out.rtmp_url = c.rtmp_url || "rtmps://global-ingest.live-video.net:443/app/";
+    out.rtmp_url = c.rtmp_url || "rtmps://global-contribute.live-video.net:443/app/";
     out.ivs_channel_arn = c.ivs_channel_arn || "";
   }
   return out;
@@ -233,21 +245,19 @@ async function getOrCreateChannelForUser(uid: string, username: string, forceNew
   if (!uid) uid = "nsU1v44XFnN3FloJvNePqj6cBG2";
   if (!username) username = "djsparkz";
 
-  // Check if channel already exists in memory cache so keys never change randomly
-  const existing = db.channels.get(uid);
-  if (existing && !forceNew && existing.stream_key) {
+  let existing = db.channels.get(uid);
+  if (existing && !forceNew && existing.stream_key && !existing.stream_key.includes("fallback")) {
     return {
       uid,
       username,
       ivs_channel_arn: existing.ivs_channel_arn,
       stream_key: existing.stream_key,
       playback_id: existing.playback_id,
-      rtmp_url: existing.rtmp_url || "rtmps://global-ingest.live-video.net:443/app/",
-      updated_at: new Date()
+      rtmp_url: existing.rtmp_url || "rtmps://global-contribute.live-video.net:443/app/",
     };
   }
 
-  const ivsData = await createIvsChannel(username);
+  const ivsData = await getOrCreateIvsChannelDetails(username);
   const newChan: ChannelDoc = {
     channel_id: uid,
     user_uid: uid,
@@ -275,35 +285,12 @@ async function getOrCreateChannelForUser(uid: string, username: string, forceNew
     stream_key: ivsData.streamKey,
     playback_id: ivsData.playbackUrl,
     rtmp_url: ivsData.ingestEndpoint,
-    updated_at: new Date()
   };
 }
 
 async function getOrRestoreUserChannel(user: UserDoc): Promise<ChannelDoc> {
-  const resolved = await getOrCreateChannelForUser(user.uid, user.username);
-  let chan = db.channels.get(user.uid);
-  if (!chan) {
-    chan = {
-      channel_id: user.uid,
-      user_uid: user.uid,
-      username: user.username,
-      display_name: user.display_name || user.username,
-      photo_url: user.photo_url || null,
-      thumbnail_url: null,
-      ivs_channel_arn: resolved.ivs_channel_arn,
-      stream_key: resolved.stream_key,
-      playback_id: resolved.playback_id,
-      stream_title: `${user.display_name || user.username}'s Live Stream`,
-      category: "music",
-      is_live: false,
-      viewer_count: 0,
-      record_enabled: true,
-      last_updated: new Date().toISOString(),
-      rtmp_url: resolved.rtmp_url,
-    };
-    db.channels.set(user.uid, chan);
-  }
-  return chan;
+  await getOrCreateChannelForUser(user.uid, user.username);
+  return db.channels.get(user.uid)!;
 }
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 10000;
@@ -329,7 +316,7 @@ async function startServer() {
         playback_id: channel.playback_id,
         ivs_channel_arn: channel.ivs_channel_arn,
         playbackUrl: channel.playback_id,
-        rtmp_url: channel.rtmp_url || "rtmps://global-ingest.live-video.net:443/app/",
+        rtmp_url: channel.rtmp_url || "rtmps://global-contribute.live-video.net:443/app/",
       });
     } catch (err: any) {
       console.error("[GET /api/channels/mine] Error:", err);
@@ -349,7 +336,7 @@ async function startServer() {
         ivs_channel_arn: channel.ivs_channel_arn,
         playbackUrl: channel.playback_id,
         streamKey: channel.stream_key,
-        rtmp_url: channel.rtmp_url || "rtmps://global-ingest.live-video.net:443/app/",
+        rtmp_url: channel.rtmp_url || "rtmps://global-contribute.live-video.net:443/app/",
       });
     } catch (err: any) {
       console.error("[POST /api/stream/create] Error:", err);
@@ -368,7 +355,7 @@ async function startServer() {
         ivs_channel_arn: channel.ivs_channel_arn,
         playbackUrl: channel.playback_id,
         streamKey: channel.stream_key,
-        rtmp_url: channel.rtmp_url || "rtmps://global-ingest.live-video.net:443/app/",
+        rtmp_url: channel.rtmp_url || "rtmps://global-contribute.live-video.net:443/app/",
       });
     } catch (err: any) {
       console.error("[POST /api/channels/generate-key] Error:", err);
@@ -376,12 +363,13 @@ async function startServer() {
     }
   });
 
-  const handleIvsCheckStatus = async (req: any, res: any) => {
+  app.post("/api/ivs/check-status", async (req, res) => {
     try {
-      const streamId = req.body.streamId || req.body.stream_id || req.body.channel_id || req.body.username || "nsU1v44XFnN3FloJvNePqj6cBG2";
+      const user = db.users.get("nsU1v44XFnN3FloJvNePqj6cBG2");
+      const chan = db.channels.get(user?.uid || "");
       const client = getIvsClient();
-      if (client && streamId.startsWith("arn:aws:ivs:")) {
-        const response = await client.send(new GetStreamCommand({ channelArn: streamId }));
+      if (client && chan?.ivs_channel_arn) {
+        const response = await client.send(new GetStreamCommand({ channelArn: chan.ivs_channel_arn }));
         const isLive = !!response.stream;
         return res.json({ isActive: isLive, isLive, is_live: isLive, stream: response.stream });
       }
@@ -389,9 +377,7 @@ async function startServer() {
     } catch (e) {
       return res.json({ isActive: false, isLive: false, is_live: false });
     }
-  };
-
-  app.post("/api/ivs/check-status", handleIvsCheckStatus);
+  });
 
   const api = express.Router();
   api.get("/users/me", async (req, res) => {
