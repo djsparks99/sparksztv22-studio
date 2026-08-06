@@ -23,8 +23,6 @@ dotenv.config();
 
 console.log("SPARKZ.TV - Server booting up with universal avatar sync.");
 
-
-
 let ivsClient: IvsClient | null = null;
 function getIvsClient() {
   if (!ivsClient) {
@@ -151,6 +149,7 @@ interface ChannelDoc {
   record_enabled: boolean;
   last_updated: string;
   rtmp_url?: string;
+  schedule?: any;
 }
 
 class InMemStore {
@@ -190,24 +189,15 @@ function isDummyOrInvalid(channel: any) {
   const displayName = (channel.display_name || "").toLowerCase().trim();
   const id = (channel.id || channel.channel_id || "").toLowerCase().trim();
 
-  // If ID is null or undefined or empty
   if (!id || id === "undefined" || id === "null") return true;
-
-  // Filter out explicit dummies or test accounts
   if (channel.is_dummy || channel.isDummy) return true;
-  
   if (DUMMY_USERNAMES.includes(username) || DUMMY_USERNAMES.includes(displayName) || DUMMY_USERNAMES.includes(id)) {
     return true;
   }
-
-  // Filter out channel IDs starting with dummy patterns
   if (id.startsWith("chan-pirate") || id.startsWith("chan-acid") || id.startsWith("chan-dub") || id.startsWith("dummy-")) {
     return true;
   }
-
-  // Filter out stubs where username is too short
   if (username.length < 2) return true;
-
   return false;
 }
 
@@ -235,6 +225,7 @@ function channelPublic(c: ChannelDoc, opts: { include_stream_key?: boolean } = {
     avatar: activePhoto,
     avatar_url: activePhoto,
     thumbnail_url: c.thumbnail_url || null,
+    thumbnailUrl: c.thumbnail_url || null,
     playback_id: playbackId,
     playbackUrl: playbackId,
     stream_title: c.stream_title || `${displayName}'s Live Stream`,
@@ -243,6 +234,7 @@ function channelPublic(c: ChannelDoc, opts: { include_stream_key?: boolean } = {
     isLive: Boolean(c.is_live),
     viewer_count: c.viewer_count || 0,
     last_updated: c.last_updated,
+    schedule: c.schedule || null,
   };
 
   if (opts.include_stream_key) {
@@ -264,7 +256,7 @@ async function getMasterChannel() {
       channel_id: "djsparkz",
       user_uid: "nsU1v44XFnN3FloJvNePqj6cBG2",
       username: "djsparkz",
-      display_name: user?.display_name || "djsparkz",
+      display_name: "djsparkz",
       photo_url: user?.photo_url || null,
       thumbnail_url: null,
       ivs_channel_arn: ivsData.arn,
@@ -472,12 +464,9 @@ async function startServer() {
         db.users.set(uid, user);
       }
 
-      // Final sanitization check for djsparkz
       if (user && user.email === "markysparks99@gmail.com") {
         user.username = "djsparkz";
-        if (!user.display_name || user.display_name === "SPARKS 108 FM" || user.display_name === "markysparks99") {
-          user.display_name = "djsparkz";
-        }
+        user.display_name = "djsparkz";
       }
 
       req.user = user;
@@ -491,16 +480,7 @@ async function startServer() {
   
   api.get("/categories", (req, res) => {
     return res.json([
-      "music",
-      "talk",
-      "gaming",
-      "art",
-      "outdoors",
-      "lounge",
-      "dj_mix",
-      "podcast",
-      "radio",
-      "vibes"
+      "music", "talk", "gaming", "art", "outdoors", "lounge", "dj_mix", "podcast", "radio", "vibes"
     ]);
   });
 
@@ -557,7 +537,7 @@ async function startServer() {
         channel.category = req.body.category;
       }
       if (req.body?.schedule !== undefined) {
-        (channel as any).schedule = req.body.schedule;
+        channel.schedule = req.body.schedule;
       }
       if (req.body?.thumbnail_url !== undefined) {
         channel.thumbnail_url = req.body.thumbnail_url;
@@ -577,9 +557,9 @@ async function startServer() {
     try {
       const channel = await getMasterChannel();
       if (req.body?.schedule !== undefined) {
-        (channel as any).schedule = req.body.schedule;
+        channel.schedule = req.body.schedule;
       }
-      return res.json({ success: true, schedule: (channel as any).schedule });
+      return res.json({ success: true, schedule: channel.schedule });
     } catch (err: any) {
       return res.status(500).json({ error: "Failed to update schedule" });
     }
@@ -844,12 +824,9 @@ async function startServer() {
             db.users.set(uid, localUser);
           }
 
-          // Final sanitization check for djsparkz in WebSocket connection
-          if (localUser && localUser.email === "markysparks99@gmail.com") {
+          if (localUser && (localUser.email === "markysparks99@gmail.com" || uid === "nsU1v44XFnN3FloJvNePqj6cBG2")) {
             localUser.username = "djsparkz";
-            if (!localUser.display_name || localUser.display_name === "SPARKS 108 FM" || localUser.display_name === "markysparks99") {
-              localUser.display_name = "djsparkz";
-            }
+            localUser.display_name = "djsparkz";
           }
 
           username = localUser.username;
@@ -905,8 +882,8 @@ async function startServer() {
             const typingPayload = {
               type: "typing",
               uid: client.uid,
-              username: data.sender_username || client.username,
-              display_name: data.sender_display_name || client.displayName,
+              username: client.username,
+              display_name: client.displayName,
               is_typing: data.is_typing
             };
             const roomClients = chatRooms.get(roomName);
@@ -937,9 +914,9 @@ async function startServer() {
               id: "msg-" + Date.now() + "-" + Math.random().toString(36).substring(2, 9),
               text: text,
               sender_uid: client.uid,
-              sender_username: data.sender_username || client.username,
-              sender_display_name: data.sender_display_name || client.displayName,
-              sender_photo_url: data.sender_photo_url !== undefined ? data.sender_photo_url : client.photoUrl,
+              sender_username: client.username,
+              sender_display_name: client.displayName,
+              sender_photo_url: client.photoUrl,
               created_at: new Date().toISOString(),
               is_highlighted: isHighlighted,
               highlight_type: highlightType,
