@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { getToken, setToken, fileUrl, BACKEND, api, getAbsoluteOrigin } from "@/lib/api";
 import { auth } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
-import { Send, LogIn, User, Smile, Zap, Crown, Shield, Gem, Sparkles, X, Flame } from "lucide-react";
+import { Send, LogIn, User, Smile, Zap, Crown, Shield, Gem, Sparkles, X, Flame, Calendar, Users } from "lucide-react";
 import { Link } from "react-router-dom";
 
 function wsUrl(username, token, guestName = "") {
@@ -19,6 +19,10 @@ export default function ChatPanel({ username }) {
   const [connected, setConnected] = useState(false);
   const [systemLine, setSystemLine] = useState(null);
   
+  // Twitch-style profile inspection popup state
+  const [inspectUser, setInspectUser] = useState(null);
+  const [inspectLoading, setInspectLoading] = useState(false);
+  
   // Guest Name State (for guests chatting without an account)
   const [guestName, setGuestName] = useState(() => {
     return localStorage.getItem("sparkz_guest_name") || "";
@@ -34,7 +38,7 @@ export default function ChatPanel({ username }) {
   // Emotes state
   const [emotes, setEmotes] = useState([]);
   const [showEmotePicker, setShowEmotePicker] = useState(false);
-  const [emoteTab, setEmoteTab] = useState("all"); // "all", "channel", "global"
+  const [emoteTab, setEmoteTab] = useState("all"); 
   const [emoteSearch, setEmoteSearch] = useState("");
 
   // Typing state
@@ -46,11 +50,27 @@ export default function ChatPanel({ username }) {
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
 
+  // Fetch chatter profile for the Twitch-style popup card
+  const handleInspectChatter = async (targetUsername) => {
+    if (!targetUsername) return;
+    setInspectLoading(true);
+    setInspectUser({ username: targetUsername, display_name: targetUsername });
+    try {
+      const { data } = await api.get(`/users/profile/${encodeURIComponent(targetUsername)}`);
+      if (data) {
+        setInspectUser(data);
+      }
+    } catch {
+      // Fallback with basic username if fetch fails
+    } finally {
+      setInspectLoading(false);
+    }
+  };
+
   // Fetch initial messages & Watts balance & Emotes list
   useEffect(() => {
     let cancelled = false;
 
-    // Load Chat History
     api
       .get(`/channels/${username}/messages`, { params: { limit: 100 } })
       .then(({ data }) => {
@@ -62,7 +82,6 @@ export default function ChatPanel({ username }) {
         if (!cancelled) setMessages([]);
       });
 
-    // Load Channel & Global Emotes
     api
       .get(`/channels/${username}/emotes`)
       .then(({ data }) => {
@@ -72,7 +91,6 @@ export default function ChatPanel({ username }) {
       })
       .catch(() => {});
 
-    // Load User Watts
     if (user) {
       api
         .get("/users/me/watts")
@@ -89,7 +107,6 @@ export default function ChatPanel({ username }) {
     };
   }, [username, user]);
 
-  // Save guest name
   const saveGuestName = (e) => {
     e?.preventDefault();
     const clean = tempGuestName.trim().slice(0, 24);
@@ -100,7 +117,6 @@ export default function ChatPanel({ username }) {
     setIsEditingGuestName(false);
   };
 
-  // Watts Time-based Accrual Heartbeat (ping every 10 seconds while connected/watching)
   useEffect(() => {
     if (!connected) return;
 
@@ -111,24 +127,21 @@ export default function ChatPanel({ username }) {
           if (data && typeof data.watts === "number") {
             setWatts(data.watts);
             if (data.accrued > 0) {
-              setAccruedNotice(`+${data.accrued} ⚡ WATTS ACCRUED`);
+              setAccruedNotice(`+${data.accrued}  WATTS ACCRUED`);
               setTimeout(() => setAccruedNotice(null), 3000);
             }
           }
         } else {
           setWatts((prev) => prev + 15);
-          setAccruedNotice(`+15 ⚡ WATTS ACCRUED`);
+          setAccruedNotice(`+15  WATTS ACCRUED`);
           setTimeout(() => setAccruedNotice(null), 3000);
         }
-      } catch {
-        // Silently ignore ping errors
-      }
+      } catch {}
     }, 10000);
 
     return () => clearInterval(interval);
   }, [username, user, connected]);
 
-  // Connect to WebSocket chat room
   useEffect(() => {
     if (!username) return;
     let active = true;
@@ -144,15 +157,12 @@ export default function ChatPanel({ username }) {
         try {
           token = await auth.currentUser.getIdToken();
           if (token) setToken(token);
-        } catch {
-          // ignore
-        }
+        } catch {}
       }
       token = token || "guest";
       if (!active) return;
 
       const url = wsUrl(username, token, !user ? guestName : "");
-      console.log(`[WS] Connecting to chat room: ${url}`);
       ws = new WebSocket(url);
       wsRef.current = ws;
 
@@ -161,9 +171,8 @@ export default function ChatPanel({ username }) {
           ws.close();
           return;
         }
-        console.log("[WS] Connected successfully to chat");
         setConnected(true);
-        retryCount = 0; // reset retry count on successful connection
+        retryCount = 0;
       };
 
       ws.onclose = (event) => {
@@ -171,10 +180,8 @@ export default function ChatPanel({ username }) {
         setConnected(false);
         wsRef.current = null;
         
-        // Calculate backoff time: start at 1s, double up to 10s
         const backoff = Math.min(10000, 1000 * Math.pow(2, retryCount));
         retryCount++;
-        console.warn(`[WS] Connection closed. Reconnecting in ${backoff}ms...`, event);
         
         reconnectTimeout = setTimeout(() => {
           if (active) connect();
@@ -182,11 +189,8 @@ export default function ChatPanel({ username }) {
       };
 
       ws.onerror = (err) => {
-        console.error("[WS] Connection error:", err);
         if (ws) {
-          try {
-            ws.close();
-          } catch {}
+          try { ws.close(); } catch {}
         }
       };
 
@@ -210,12 +214,9 @@ export default function ChatPanel({ username }) {
                 sender_badges: data.sender_badges,
                 sender_color: data.sender_color,
                 is_system_command: data.is_system_command,
-                command_action: data.command_action,
-                command_target: data.command_target,
               },
             ]);
 
-            // Clear typing status for sender
             if (data.sender_uid) {
               setTypingUsers((prev) => {
                 if (!prev[data.sender_uid]) return prev;
@@ -260,9 +261,7 @@ export default function ChatPanel({ username }) {
             setSystemLine(data.message);
             setTimeout(() => setSystemLine(null), 6000);
           }
-        } catch {
-          // ignore malformed frames
-        }
+        } catch {}
       };
     };
 
@@ -272,15 +271,12 @@ export default function ChatPanel({ username }) {
       active = false;
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
       if (ws) {
-        try {
-          ws.close();
-        } catch {}
+        try { ws.close(); } catch {}
       }
       wsRef.current = null;
     };
   }, [username, user, guestName]);
 
-  // Auto-scroll chat to bottom
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -343,7 +339,6 @@ export default function ChatPanel({ username }) {
     const t = text.trim();
     if (!t || !wsRef.current || wsRef.current.readyState !== 1) return;
 
-    // Clear typing indicator on send
     if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
     wsRef.current.send(
       JSON.stringify({
@@ -411,7 +406,6 @@ export default function ChatPanel({ username }) {
           <div
             data-testid="watts-counter"
             className="inline-flex items-center gap-1 border border-[#e5ff00]/40 bg-[#e5ff00]/10 px-2 py-0.5 font-mono text-[10px] uppercase font-bold text-[#e5ff00] rounded-sm"
-            title="Your Viewer Watts points accrued while watching"
           >
             <Zap className="h-3 w-3 fill-[#e5ff00]" />
             <span>{watts} WATTS</span>
@@ -454,7 +448,12 @@ export default function ChatPanel({ username }) {
 
         {Array.isArray(messages) &&
           messages.map((m) => (
-            <ChatMessage key={m.id || Math.random()} m={m} emotes={emotes} />
+            <ChatMessage
+              key={m.id || Math.random()}
+              m={m}
+              emotes={emotes}
+              onInspectUser={handleInspectChatter}
+            />
           ))}
 
         {systemLine && (
@@ -463,6 +462,90 @@ export default function ChatPanel({ username }) {
           </div>
         )}
       </div>
+
+      {/* Twitch-Style Chatter Profile Inspect Card Modal */}
+      {inspectUser && (
+        <div
+          className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4 animate-fade-in"
+          onClick={() => setInspectUser(null)}
+        >
+          <div
+            className="w-full max-w-xs border border-[#e5ff00]/50 bg-[#0c0c0e] p-4 shadow-[0_0_25px_rgba(229,255,0,0.15)] rounded-sm relative"
+            onClick={(e) => e.stopPropagation()}
+            data-testid="chatter-profile-card"
+          >
+            <button
+              onClick={() => setInspectUser(null)}
+              className="absolute top-3 right-3 text-zinc-400 hover:text-[#e5ff00]"
+            >
+              <X className="h-4 w-4" />
+            </button>
+
+            <div className="flex items-center gap-3 border-b border-[#27272a] pb-3">
+              {inspectUser.photo_url ? (
+                <img
+                  src={fileUrl(inspectUser.photo_url)}
+                  alt=""
+                  className="h-12 w-12 border border-[#e5ff00] object-cover rounded-sm"
+                />
+              ) : (
+                <div className="flex h-12 w-12 items-center justify-center border border-[#27272a] bg-black rounded-sm">
+                  <User className="h-6 w-6 text-[#e5ff00]" />
+                </div>
+              )}
+              <div className="min-w-0 flex-1">
+                <div className="font-mono text-xs font-bold uppercase text-white truncate">
+                  {inspectUser.display_name || inspectUser.username}
+                </div>
+                <div className="font-mono text-[10px] text-zinc-400 truncate">
+                  @{inspectUser.username}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-3 space-y-2 font-mono text-[11px]">
+              {inspectUser.bio && (
+                <div className="text-zinc-300 italic text-[10px] border-l-2 border-[#e5ff00] pl-2 py-0.5">
+                  &ldquo;{inspectUser.bio}&rdquo;
+                </div>
+              )}
+
+              <div className="flex items-center justify-between text-zinc-400 pt-1">
+                <span className="flex items-center gap-1.5">
+                  <Zap className="h-3 w-3 text-[#e5ff00]" /> Watts Balance:
+                </span>
+                <span className="font-bold text-[#e5ff00]">{inspectUser.watts ?? 100}</span>
+              </div>
+
+              <div className="flex items-center justify-between text-zinc-400">
+                <span className="flex items-center gap-1.5">
+                  <Users className="h-3 w-3 text-cyan-400" /> Followers:
+                </span>
+                <span className="font-bold text-white">{inspectUser.followers_count ?? 0}</span>
+              </div>
+
+              <div className="flex items-center justify-between text-zinc-400">
+                <span className="flex items-center gap-1.5">
+                  <Calendar className="h-3 w-3 text-zinc-500" /> Joined:
+                </span>
+                <span className="text-[10px] text-zinc-300">
+                  {inspectUser.created_at ? new Date(inspectUser.created_at).toLocaleDateString() : "Recent"}
+                </span>
+              </div>
+            </div>
+
+            <div className="mt-4 pt-3 border-t border-[#27272a] flex justify-end">
+              <Link
+                to={`/channel/${inspectUser.username}`}
+                onClick={() => setInspectUser(null)}
+                className="w-full text-center btn-primary py-1.5 text-[10px] uppercase font-bold"
+              >
+                VISIT CHANNEL
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Emote Picker Popover */}
       {showEmotePicker && (
@@ -531,7 +614,6 @@ export default function ChatPanel({ username }) {
                 onClick={() => handleEmoteSelect(e.code)}
                 className="flex flex-col items-center justify-center border border-[#27272a] bg-black p-1.5 hover:border-[#e5ff00] transition-colors rounded-sm group"
                 title={`${e.name} (${e.code})`}
-                data-testid={`emote-item-${e.code}`}
               >
                 <img
                   src={e.image_url.startsWith("http") ? e.image_url : fileUrl(e.image_url)}
@@ -571,7 +653,6 @@ export default function ChatPanel({ username }) {
       {/* Input Bar */}
       <footer className="border-t border-[#27272a] p-3 bg-[#0a0a0a]">
         <div className="space-y-2">
-          {/* Unlocked Chat Bar & Guest Status */}
           <div className="flex flex-wrap items-center justify-between gap-1 text-[10px] font-mono">
             <button
               type="button"
@@ -587,7 +668,7 @@ export default function ChatPanel({ username }) {
               }`}
             >
               <Flame className={`h-3 w-3 ${isHighlight ? "animate-pulse" : ""}`} />
-              <span>HIGH VOLTAGE SHOUT (50 ⚡)</span>
+              <span>HIGH VOLTAGE SHOUT (50)</span>
             </button>
 
             {!user ? (
@@ -615,7 +696,6 @@ export default function ChatPanel({ username }) {
                       setIsEditingGuestName(true);
                     }}
                     className="hover:text-[#e5ff00] text-zinc-400 underline text-[9px] uppercase"
-                    title="Click to change guest display name"
                   >
                     Name: {guestName || "Guest"}
                   </button>
@@ -623,7 +703,7 @@ export default function ChatPanel({ username }) {
               </div>
             ) : (
               <span className="font-mono text-[9px] uppercase tracking-widest text-zinc-500">
-                EARN 15⚡ / 10S
+                EARN 15 / 10S
               </span>
             )}
           </div>
@@ -640,8 +720,8 @@ export default function ChatPanel({ username }) {
                 onChange={handleInputChange}
                 placeholder={
                   isHighlight
-                    ? "⚡ SHOUT WITH HIGH VOLTAGE GLOW..."
-                    : "SHOUT INTO CHAT (Unlocked for all)..."
+                    ? "SHOUT WITH HIGH VOLTAGE GLOW..."
+                    : "SHOUT INTO CHAT..."
                 }
                 maxLength={500}
                 disabled={!connected}
@@ -651,7 +731,6 @@ export default function ChatPanel({ username }) {
                 onClick={() => setShowEmotePicker(!showEmotePicker)}
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-[#e5ff00]"
                 title="Insert Emote"
-                data-testid="emote-picker-toggle"
               >
                 <Smile className="h-4 w-4" />
               </button>
@@ -662,7 +741,6 @@ export default function ChatPanel({ username }) {
               type="submit"
               className={`btn-primary ${isHighlight ? "bg-[#e5ff00] text-black hover:bg-[#c8de00]" : ""}`}
               disabled={!connected || !text.trim()}
-              aria-label="Send message"
             >
               <Send className="h-3.5 w-3.5" />
             </button>
@@ -673,20 +751,17 @@ export default function ChatPanel({ username }) {
   );
 }
 
-function ChatMessage({ m, emotes }) {
+function ChatMessage({ m, emotes, onInspectUser }) {
   const isHighVoltage = m.is_highlighted;
   const isSystemCommand = m.is_system_command || m.sender_uid === "system-bot" || m.sender_username === "sparkz_bot";
 
-  // Emote parser helper
   const renderMessageContent = (text, emoteList) => {
     if (!text) return null;
     if (!emoteList || emoteList.length === 0) return text;
 
-    // Create lookup map
     const emoteMap = new Map();
     emoteList.forEach((e) => emoteMap.set(e.code, e));
 
-    // Split text by emote patterns like :emoteCode:
     const parts = text.split(/(:[a-zA-Z0-9_]+:)/g);
 
     return parts.map((part, idx) => {
@@ -709,16 +784,7 @@ function ChatMessage({ m, emotes }) {
 
   if (isSystemCommand) {
     return (
-      <div
-        className="relative overflow-hidden p-3 my-2 border border-[#e5ff00] bg-black/60 shadow-[0_0_15px_rgba(229,255,0,0.15)] rounded-sm font-mono text-xs animate-fade-in"
-        data-testid={`chat-msg-system-${m.id}`}
-      >
-        {/* Decorative corner lines */}
-        <div className="absolute top-0 left-0 w-1.5 h-1.5 border-t border-l border-[#e5ff00]" />
-        <div className="absolute top-0 right-0 w-1.5 h-1.5 border-t border-r border-[#e5ff00]" />
-        <div className="absolute bottom-0 left-0 w-1.5 h-1.5 border-b border-l border-[#e5ff00]" />
-        <div className="absolute bottom-0 right-0 w-1.5 h-1.5 border-b border-r border-[#e5ff00]" />
-        
+      <div className="relative overflow-hidden p-3 my-2 border border-[#e5ff00] bg-black/60 shadow-[0_0_15px_rgba(229,255,0,0.15)] rounded-sm font-mono text-xs">
         <div className="flex items-center gap-2 mb-1.5">
           <div className="flex h-5 w-5 items-center justify-center border border-[#e5ff00] bg-[#e5ff00]/10 rounded-xs">
             <Sparkles className="h-3 w-3 text-[#e5ff00] animate-pulse" />
@@ -726,11 +792,8 @@ function ChatMessage({ m, emotes }) {
           <span className="text-[9px] uppercase font-bold text-[#e5ff00] tracking-widest">
             SPARKZ ALERT // SYSTEM BOT
           </span>
-          <span className="ml-auto text-[8px] text-zinc-500">
-            {m.created_at ? new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : ""}
-          </span>
         </div>
-        <div className="text-zinc-100 font-bold leading-relaxed tracking-wide">
+        <div className="text-zinc-100 font-bold leading-relaxed">
           {renderMessageContent(m.text, emotes)}
         </div>
       </div>
@@ -744,9 +807,7 @@ function ChatMessage({ m, emotes }) {
           ? "border border-[#e5ff00] bg-gradient-to-r from-[#e5ff00]/15 via-[#e5ff00]/5 to-transparent shadow-[0_0_15px_rgba(229,255,0,0.2)]"
           : "hover:bg-white/5"
       }`}
-      data-testid={`chat-msg-${m.id}`}
     >
-      {/* Avatar */}
       {m.sender_photo_url ? (
         <img
           src={fileUrl(m.sender_photo_url)}
@@ -765,18 +826,20 @@ function ChatMessage({ m, emotes }) {
         </div>
       )}
 
-      {/* Message Body */}
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-1.5">
-          {/* VIP / Supporter Badge Flares */}
           <BadgeFlares badges={m.sender_badges} />
 
-          <span
-            className="truncate font-mono text-[11px] font-bold uppercase tracking-widest"
+          {/* Clickable Chatter Username to inspect profile */}
+          <button
+            type="button"
+            onClick={() => onInspectUser(m.sender_username)}
+            className="truncate font-mono text-[11px] font-bold uppercase tracking-widest hover:underline cursor-pointer text-left"
             style={{ color: m.sender_color || "#e5ff00" }}
+            title="Click to inspect chatter profile"
           >
             {m.sender_display_name}
-          </span>
+          </button>
 
           <span className="truncate font-mono text-[10px] text-zinc-500">
             @{m.sender_username}
@@ -807,62 +870,28 @@ function BadgeFlares({ badges }) {
   return (
     <div className="flex items-center gap-1">
       {badges.includes("guest") && (
-        <span
-          className="inline-flex items-center gap-0.5 border border-zinc-700 bg-zinc-800/80 px-1 py-0.2 font-mono text-[8px] uppercase font-bold text-zinc-300 rounded-xs"
-          title="Guest Chatter"
-          data-testid="badge-guest"
-        >
+        <span className="inline-flex items-center gap-0.5 border border-zinc-700 bg-zinc-800/80 px-1 py-0.2 font-mono text-[8px] uppercase font-bold text-zinc-300 rounded-xs">
           <User className="h-2.5 w-2.5" /> GUEST
         </span>
       )}
-
       {badges.includes("broadcaster") && (
-        <span
-          className="inline-flex items-center gap-0.5 border border-[#e5ff00] bg-[#e5ff00]/15 px-1 py-0.2 font-mono text-[8px] uppercase font-bold text-[#e5ff00] shadow-[0_0_8px_rgba(229,255,0,0.5)] rounded-xs"
-          title="Broadcaster / Channel Owner"
-          data-testid="badge-broadcaster"
-        >
+        <span className="inline-flex items-center gap-0.5 border border-[#e5ff00] bg-[#e5ff00]/15 px-1 py-0.2 font-mono text-[8px] uppercase font-bold text-[#e5ff00] rounded-xs">
           <Crown className="h-2.5 w-2.5 fill-[#e5ff00]" /> HOST
         </span>
       )}
-
       {badges.includes("mod") && (
-        <span
-          className="inline-flex items-center gap-0.5 border border-emerald-400 bg-emerald-500/15 px-1 py-0.2 font-mono text-[8px] uppercase font-bold text-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.4)] rounded-xs"
-          title="Channel Moderator"
-          data-testid="badge-mod"
-        >
+        <span className="inline-flex items-center gap-0.5 border border-emerald-400 bg-emerald-500/15 px-1 py-0.2 font-mono text-[8px] uppercase font-bold text-emerald-400 rounded-xs">
           <Shield className="h-2.5 w-2.5 fill-emerald-400" /> MOD
         </span>
       )}
-
       {badges.includes("vip") && (
-        <span
-          className="inline-flex items-center gap-0.5 border border-fuchsia-400 bg-fuchsia-500/15 px-1 py-0.2 font-mono text-[8px] uppercase font-bold text-fuchsia-400 shadow-[0_0_8px_rgba(232,121,249,0.4)] rounded-xs"
-          title="VIP Supporter"
-          data-testid="badge-vip"
-        >
+        <span className="inline-flex items-center gap-0.5 border border-fuchsia-400 bg-fuchsia-500/15 px-1 py-0.2 font-mono text-[8px] uppercase font-bold text-fuchsia-400 rounded-xs">
           <Gem className="h-2.5 w-2.5 fill-fuchsia-400" /> VIP
         </span>
       )}
-
       {badges.includes("supporter") && (
-        <span
-          className="inline-flex items-center gap-0.5 border border-cyan-400 bg-cyan-500/15 px-1 py-0.2 font-mono text-[8px] uppercase font-bold text-cyan-400 shadow-[0_0_6px_rgba(34,211,238,0.4)] rounded-xs"
-          title="Channel Supporter"
-          data-testid="badge-supporter"
-        >
+        <span className="inline-flex items-center gap-0.5 border border-cyan-400 bg-cyan-500/15 px-1 py-0.2 font-mono text-[8px] uppercase font-bold text-cyan-400 rounded-xs">
           <Zap className="h-2.5 w-2.5 fill-cyan-400" /> SUPPORTER
-        </span>
-      )}
-
-      {badges.includes("watts_king") && (
-        <span
-          className="inline-flex items-center gap-0.5 border border-yellow-400 bg-yellow-500/15 px-1 py-0.2 font-mono text-[8px] uppercase font-bold text-yellow-300 shadow-[0_0_8px_rgba(250,204,21,0.5)] rounded-xs"
-          title="High Voltage Legend (1,000+ Watts)"
-          data-testid="badge-watts-king"
-        >
-          <Zap className="h-2.5 w-2.5 fill-yellow-300" /> 1K⚡
         </span>
       )}
     </div>

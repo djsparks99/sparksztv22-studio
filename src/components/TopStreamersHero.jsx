@@ -22,7 +22,7 @@ const DUMMY_USERNAMES = ["pirate_fm", "acid_vault", "dub_station", "test", "demo
 
 export default function TopStreamersHero({ allChannels = [] }) {
   const { user } = useAuth();
-  // Filter out dummy/test channels, incomplete records, and deduplicate by username
+  
   const seenUsernames = new Set();
   const validChannels = (allChannels || []).filter((c) => {
     if (!c) return false;
@@ -51,20 +51,18 @@ export default function TopStreamersHero({ allChannels = [] }) {
     return true;
   });
 
-  // Sort all active or available channels by viewer_count in descending order
+  // Sort channels by viewer_count descending to automatically surface the top-viewed streamer
   const sortedChannels = [...validChannels].sort((a, b) => {
     const aViews = Number(a.viewer_count || a.viewerCount || a.views || 0);
     const bViews = Number(b.viewer_count || b.viewerCount || b.views || 0);
     if (bViews !== aViews) {
       return bViews - aViews;
     }
-    // If viewer counts are equal, prioritize live channels
     const aLive = Boolean(a.is_live || a.isLive);
     const bLive = Boolean(b.is_live || b.isLive);
     if (aLive !== bLive) {
       return bLive ? 1 : -1;
     }
-    // Secondary tie-breaker: djsparkz
     const aSparkz = (a.username || "").toLowerCase() === "djsparkz";
     const bSparkz = (b.username || "").toLowerCase() === "djsparkz";
     if (aSparkz !== bSparkz) {
@@ -75,7 +73,6 @@ export default function TopStreamersHero({ allChannels = [] }) {
 
   const liveChannels = validChannels.filter((c) => Boolean(c.is_live || c.isLive));
 
-  // Fallback state if no active stream is found
   const fallbackStreamer = validChannels.find(
     (c) => (c.username || "").toLowerCase() === "djsparkz"
   ) || validChannels[0] || {
@@ -94,7 +91,7 @@ export default function TopStreamersHero({ allChannels = [] }) {
   const activeSlug = activeStreamer.username || activeStreamer.channel_id || activeStreamer.id || "channel";
   const activeViews = Number(activeStreamer.viewer_count || activeStreamer.viewerCount || activeStreamer.views || 0);
 
-  // Check channel.thumbnail_url, channel.thumbnailUrl, or channel.preview_image (or previewImage)
+  // Custom cover image uploaded in dashboard check
   const thumbnailSource = activeStreamer.thumbnail_url || activeStreamer.thumbnailUrl || activeStreamer.preview_image || activeStreamer.previewImage;
   const photoSource = activeStreamer.photo_url || activeStreamer.photoUrl || (activeStreamer.user && (activeStreamer.user.photo_url || activeStreamer.user.photoUrl));
   const activeThumb = thumbnailSource
@@ -110,7 +107,6 @@ export default function TopStreamersHero({ allChannels = [] }) {
     (user.username && user.username.toLowerCase() === activeSlug.toLowerCase())
   );
 
-  // Avatar Force-Override: Explicitly check and render channel.photo_url or user.photo_url, bypassing hardcoded default user icons.
   const avatarUrl = activeStreamer.photo_url || 
                     activeStreamer.photoUrl || 
                     (activeStreamer.user && (activeStreamer.user.photo_url || activeStreamer.user.photoUrl)) ||
@@ -127,7 +123,6 @@ export default function TopStreamersHero({ allChannels = [] }) {
       <div className="grid-lines absolute inset-0 opacity-30" />
       
       <div className="relative mx-auto max-w-[1440px] px-4 py-8 sm:px-6 lg:py-12">
-        {/* Section Title Header */}
         <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between" id="hero-header-section">
           <div>
             <h1 className="mt-0.5 font-display text-2xl font-black uppercase tracking-tight text-white sm:text-3xl lg:text-4xl">
@@ -152,9 +147,7 @@ export default function TopStreamersHero({ allChannels = [] }) {
           </div>
         </div>
 
-        {/* Unified Two-Column Layout */}
         <div className="grid grid-cols-1 gap-8 lg:grid-cols-12 lg:items-center mt-6 border-t border-[#1f1f23] pt-8" id="two-column-layout-section">
-          {/* Left Column: Bold text block in site's neon accent theme */}
           <div className="flex flex-col justify-center lg:col-span-5 py-6 pr-4" id="left-column-hero-text">
             <div className="mb-4 inline-flex self-start items-center gap-2 border border-[#27272a] bg-[#09090b] px-3 py-1 font-mono text-[10px] uppercase tracking-wider text-zinc-400">
               <span className={`relative flex h-2 w-2 ${isLive ? "animate-pulse" : ""}`}>
@@ -184,17 +177,20 @@ export default function TopStreamersHero({ allChannels = [] }) {
           {/* Right Column: Featured Stream Preview Card */}
           <div className="lg:col-span-7" id="featured-streamer-player">
             <div className="group flex flex-col overflow-hidden border border-[#27272a] bg-[#0a0a0a] transition-all hover:border-[#e5ff00] w-full shadow-2xl relative">
-              {/* Cover/preview thumbnail uploaded from dashboard as its background when offline */}
+              
+              {/* Dashboard custom cover image background when offline */}
               {!isLive && thumbnailSource && (
                 <div 
                   className="absolute inset-0 bg-cover bg-center opacity-[0.07] blur-md pointer-events-none"
                   style={{ backgroundImage: `url(${activeThumb})` }}
                 />
               )}
-              {/* Thumbnail / Image banner */}
+
+              {/* Player / Thumbnail Banner container */}
               <div className="relative aspect-[16/9] max-h-[360px] w-full overflow-hidden bg-black sm:max-h-[400px]">
                 {isLive ? (
                   <div className="w-full h-full relative" data-testid="live-player-container">
+                    {/* HlsPlayer configured with controls={false} for a clean preview without controls */}
                     <HlsPlayer
                       playbackId={activeStreamer.playback_id || activeStreamer.playbackId}
                       isLive={true}
@@ -228,7 +224,7 @@ export default function TopStreamersHero({ allChannels = [] }) {
                   )}
                 </div>
 
-                {/* Viewer count badge (only if active streamer is actually live) */}
+                {/* Viewer count badge */}
                 {isLive && (
                   <div className="absolute right-3 top-3 flex items-center gap-1 border border-[#27272a] bg-black/85 px-2.5 py-0.5 font-mono text-[11px] font-bold text-white backdrop-blur-md z-10">
                     <Eye className="h-3 w-3 text-[#e5ff00]" />
@@ -236,7 +232,6 @@ export default function TopStreamersHero({ allChannels = [] }) {
                   </div>
                 )}
 
-                {/* Play Overlay Button */}
                 {!isLive && (
                   <Link
                     to={`/channel/${activeSlug}`}

@@ -117,7 +117,6 @@ export default function LiveSidebar() {
   );
   const [loaded, setLoaded] = useState(false);
 
-  // Store active chimes by username
   const [chimes, setChimes] = useState(() => {
     try {
       const saved = localStorage.getItem(CHIMES_KEY);
@@ -139,14 +138,12 @@ export default function LiveSidebar() {
 
     try {
       localStorage.setItem(CHIMES_KEY, JSON.stringify(updated));
-    } catch {
-      // ignore
-    }
+    } catch {}
 
     if (nextState) {
       toast.success(`Chime set! You will be notified when @${username} goes live.`, {
         description: `Green room reminder active for ${displayName || username}.`,
-        icon: "🔔",
+        icon: "",
       });
     } else {
       toast.info(`Chime reminder removed for @${username}.`);
@@ -158,12 +155,9 @@ export default function LiveSidebar() {
     setShowOffline(next);
     try {
       localStorage.setItem(SHOW_OFFLINE_KEY, next ? "1" : "0");
-    } catch {
-      // ignore
-    }
+    } catch {}
   };
 
-  // Fetch following list for current user with auto-sync and event listener
   useEffect(() => {
     if (!user) {
       setFollowingList([]);
@@ -201,7 +195,6 @@ export default function LiveSidebar() {
     };
   }, [user]);
 
-  // Set of usernames user is following
   const followedSet = useMemo(() => {
     return new Set(followingList.map((u) => u.toLowerCase()));
   }, [followingList]);
@@ -209,7 +202,6 @@ export default function LiveSidebar() {
   useEffect(() => {
     let cancelled = false;
 
-    // Fetch initial channel list from API first
     api
       .get("/channels")
       .then(({ data }) => {
@@ -232,7 +224,6 @@ export default function LiveSidebar() {
         if (!cancelled) setLoaded(true);
       });
 
-    // Subscribe to Firestore for real-time live & schedule updates
     const q = collection(db, "channels");
     const unsubscribe = onSnapshot(
       q,
@@ -242,7 +233,6 @@ export default function LiveSidebar() {
         setChannels((prev) => {
           const map = new Map();
 
-          // Load previous state
           prev.forEach((c) => {
             const key = getNormalizedKey(c, c.id);
             if (!DUMMY_USERNAMES.includes(key) && !c.is_dummy) {
@@ -250,7 +240,6 @@ export default function LiveSidebar() {
             }
           });
 
-          // Overlay real-time snapshot
           snapshot.forEach((docSnap) => {
             const docId = docSnap.id;
             const data = docSnap.data();
@@ -272,7 +261,6 @@ export default function LiveSidebar() {
             let playbackId = data.playback_id || data.playbackId || "";
             let livepeerStreamId = data.livepeer_stream_id || "";
 
-            // Force correct values for djsparkz
             if (data.username?.toLowerCase() === "djsparkz" || docId === "nsU1v44XFnN3FloJvNePqj6cBG2" || data.user_uid === "nsU1v44XFnN3FloJvNePqj6cBG2") {
               playbackId = data.playback_url || data.playbackUrl || data.playback_id || "https://a1b2c3d4e5f6.us-east-1.playback.live-video.net/api/video/v1/us-east-1.123456789012.channel.djsparkz-channel.m3u8";
               livepeerStreamId = data.livepeer_stream_id || "arn:aws:ivs:us-east-1:123456789012:channel/djsparkz-channel";
@@ -318,7 +306,6 @@ export default function LiveSidebar() {
         setLoaded(true);
       },
       (err) => {
-        console.warn("Sidebar Firestore sync notice:", err);
         setLoaded(true);
       }
     );
@@ -335,19 +322,16 @@ export default function LiveSidebar() {
     try {
       localStorage.setItem(STORAGE_KEY, next ? "1" : "0");
       window.dispatchEvent(new Event("sidebar-toggle"));
-    } catch {
-      // ignore
-    }
+    } catch {}
   };
 
-  // Filter out dummy channels & deduplicate
   const safeChannels = (Array.isArray(channels) ? channels : []).filter((c) => {
     if (!isValidChannel(c)) return false;
     const norm = getNormalizedKey(c, c.id);
     return !DUMMY_USERNAMES.includes(norm) && !c.is_dummy;
   });
 
-  // Separate followed channels and recommended/other channels
+  // Strict Follower Filter: Only allow channels in followedSet
   const followedChannels = safeChannels.filter((c) => {
     if (!user) return false;
     const targetUname = getTargetUsername(c).toLowerCase();
@@ -359,7 +343,6 @@ export default function LiveSidebar() {
     return !user || !followedSet.has(targetUname);
   });
 
-  // Followed breakdown
   const followedLive = followedChannels.filter((c) => Boolean(c.is_live || c.isLive));
   const followedUpcoming = followedChannels.filter(
     (c) => !Boolean(c.is_live || c.isLive) && Array.isArray(c.schedule) && c.schedule.length > 0
@@ -368,7 +351,6 @@ export default function LiveSidebar() {
     (c) => !Boolean(c.is_live || c.isLive) && (!Array.isArray(c.schedule) || c.schedule.length === 0)
   );
 
-  // Recommended breakdown
   const recommendedLive = recommendedChannels.filter((c) => Boolean(c.is_live || c.isLive));
   const recommendedUpcoming = recommendedChannels.filter(
     (c) => !Boolean(c.is_live || c.isLive) && Array.isArray(c.schedule) && c.schedule.length > 0
@@ -429,7 +411,7 @@ export default function LiveSidebar() {
           />
         ) : (
           <>
-            {/* FOLLOWED LIVE SECTION */}
+            {/* ONLY SHOW FOLLOWED LIVE SECTION IF USER FOLLOWS THEM */}
             {followedLive.length > 0 && (
               <div>
                 {!collapsed && (
@@ -449,20 +431,21 @@ export default function LiveSidebar() {
                       isChimed={Boolean(chimes[getTargetUsername(c).toLowerCase()])}
                       onToggleChime={toggleChime}
                       navigate={navigate}
+                      showLiveIndicator={true}
                     />
                   ))}
                 </ul>
               </div>
             )}
 
-            {/* RECOMMENDED LIVE CHANNELS SECTION */}
-            {recommendedLive.length > 0 && (
+            {/* RECOMMENDED / DISCOVER LIVE (Does not show un-followed live as "your live status" unless guest/unfollowed) */}
+            {recommendedLive.length > 0 && (!user || followedChannels.length === 0) && (
               <div>
                 {!collapsed && (
                   <div className="px-3 pt-3 pb-1.5 flex items-center justify-between font-mono text-[9px] font-bold uppercase tracking-widest text-red-500">
                     <span className="flex items-center gap-1">
                       <Radio className="h-3 w-3 text-red-500 animate-pulse" />
-                      {followedChannels.length > 0 ? "RECOMMENDED LIVE" : "LIVE NOW"} ({recommendedLive.length})
+                      LIVE NOW ({recommendedLive.length})
                     </span>
                   </div>
                 )}
@@ -475,6 +458,7 @@ export default function LiveSidebar() {
                       isChimed={Boolean(chimes[getTargetUsername(c).toLowerCase()])}
                       onToggleChime={toggleChime}
                       navigate={navigate}
+                      showLiveIndicator={true}
                     />
                   ))}
                 </ul>
@@ -501,32 +485,7 @@ export default function LiveSidebar() {
                       isChimed={Boolean(chimes[getTargetUsername(c).toLowerCase()])}
                       onToggleChime={toggleChime}
                       navigate={navigate}
-                    />
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {/* RECOMMENDED CHANNELS (When user follows no channels or guest) */}
-            {followedChannels.length === 0 && recommendedUpcoming.length > 0 && (
-              <div>
-                {!collapsed && (
-                  <div className="px-3 pt-3 pb-1.5 flex items-center justify-between font-mono text-[9px] font-bold uppercase tracking-widest text-zinc-400">
-                    <span className="flex items-center gap-1">
-                      <Calendar className="h-3 w-3 text-[#e5ff00]" />
-                      UPCOMING SETS ({recommendedUpcoming.length})
-                    </span>
-                  </div>
-                )}
-                <ul>
-                  {recommendedUpcoming.map((c) => (
-                    <SidebarBroadcasterItem
-                      key={getNormalizedKey(c, c.id)}
-                      channel={c}
-                      collapsed={collapsed}
-                      isChimed={Boolean(chimes[getTargetUsername(c).toLowerCase()])}
-                      onToggleChime={toggleChime}
-                      navigate={navigate}
+                      showLiveIndicator={false}
                     />
                   ))}
                 </ul>
@@ -560,6 +519,7 @@ export default function LiveSidebar() {
                         isChimed={Boolean(chimes[getTargetUsername(c).toLowerCase()])}
                         onToggleChime={toggleChime}
                         navigate={navigate}
+                        showLiveIndicator={false}
                       />
                     ))}
                   </ul>
@@ -567,7 +527,7 @@ export default function LiveSidebar() {
               </div>
             )}
 
-            {/* FEATURED / RECOMMENDED DIRECTORY CHANNELS (Guests or when user follows no channels) */}
+            {/* RECOMMENDED CHANNELS (Guests or when user follows no channels) */}
             {followedChannels.length === 0 && recommendedOffline.length > 0 && (
               <div>
                 {!collapsed && (
@@ -594,6 +554,7 @@ export default function LiveSidebar() {
                         isChimed={Boolean(chimes[getTargetUsername(c).toLowerCase()])}
                         onToggleChime={toggleChime}
                         navigate={navigate}
+                        showLiveIndicator={false}
                       />
                     ))}
                   </ul>
@@ -619,18 +580,14 @@ export default function LiveSidebar() {
   );
 }
 
-function SidebarBroadcasterItem({ channel, collapsed, isChimed, onToggleChime, navigate }) {
+function SidebarBroadcasterItem({ channel, collapsed, isChimed, onToggleChime, navigate, showLiveIndicator }) {
   const isLive = Boolean(channel.is_live || channel.isLive);
   const hasSchedule = Array.isArray(channel.schedule) && channel.schedule.length > 0;
   const targetUsername = getTargetUsername(channel);
   const displayName = getDisplayName(channel);
   const nextSet = hasSchedule ? channel.schedule[0] : null;
 
-  // NEON STORY RING STYLING:
-  // - Live: Glowing animated neon yellow & red gradient ring
-  // - Scheduled/Upcoming: Bright electric neon yellow ring
-  // - Offline: Subtle dark zinc ring
-  const ringStyle = isLive
+  const ringStyle = (isLive && showLiveIndicator)
     ? "p-[2px] rounded-full bg-gradient-to-tr from-[#e5ff00] via-red-500 to-[#e5ff00] animate-pulse shadow-[0_0_12px_rgba(229,255,0,0.7)]"
     : hasSchedule
     ? "p-[2px] rounded-full bg-gradient-to-tr from-[#e5ff00] to-yellow-300 shadow-[0_0_8px_rgba(229,255,0,0.5)]"
@@ -644,10 +601,9 @@ function SidebarBroadcasterItem({ channel, collapsed, isChimed, onToggleChime, n
       >
         <Link
           to={`/channel/${targetUsername}`}
-          title={`${displayName} (@${targetUsername}) ${isLive ? '— LIVE NOW' : hasSchedule ? '— SCHEDULED SET' : ''}`}
+          title={`${displayName} (@${targetUsername}) ${isLive && showLiveIndicator ? '— LIVE NOW' : hasSchedule ? '— SCHEDULED SET' : ''}`}
           className="flex items-center gap-2.5 min-w-0 flex-1"
         >
-          {/* Avatar with DJ Twist Neon Story Ring */}
           <div className="relative flex-shrink-0">
             <div className={ringStyle}>
               {channel.photo_url ? (
@@ -663,8 +619,7 @@ function SidebarBroadcasterItem({ channel, collapsed, isChimed, onToggleChime, n
               )}
             </div>
 
-            {/* Small live badge indicator dot */}
-            {isLive && (
+            {isLive && showLiveIndicator && (
               <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-black bg-red-500" />
             )}
           </div>
@@ -675,7 +630,7 @@ function SidebarBroadcasterItem({ channel, collapsed, isChimed, onToggleChime, n
                 <span className="truncate font-mono text-[11px] font-bold uppercase tracking-wider text-white group-hover:text-[#e5ff00] transition-colors">
                   {displayName}
                 </span>
-                {isLive ? (
+                {isLive && showLiveIndicator ? (
                   <span className="font-mono text-[9px] font-bold text-red-500 animate-pulse">
                     LIVE
                   </span>
@@ -688,7 +643,7 @@ function SidebarBroadcasterItem({ channel, collapsed, isChimed, onToggleChime, n
 
               <div className="mt-0.5 flex items-center justify-between font-mono text-[10px] text-zinc-400">
                 <span className="truncate text-zinc-500">
-                  {isLive && channel.stream_title
+                  {isLive && showLiveIndicator && channel.stream_title
                     ? channel.stream_title
                     : hasSchedule && nextSet
                     ? nextSet.title
@@ -699,10 +654,8 @@ function SidebarBroadcasterItem({ channel, collapsed, isChimed, onToggleChime, n
           )}
         </Link>
 
-        {/* Chime & Green Room Action Buttons */}
         {!collapsed && (
           <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity ml-1.5 flex-shrink-0">
-            {/* Chime Reminder Button */}
             <button
               type="button"
               onClick={(e) => onToggleChime(targetUsername, displayName, e)}
@@ -713,12 +666,10 @@ function SidebarBroadcasterItem({ channel, collapsed, isChimed, onToggleChime, n
               }`}
               title={isChimed ? "Chime Active — Click to remove" : "Set Chime Reminder for Green Room live alert"}
               aria-label="Set Chime Reminder"
-              data-testid={`chime-btn-${targetUsername}`}
             >
               {isChimed ? <Bell className="h-3.5 w-3.5 fill-[#e5ff00]" /> : <BellOff className="h-3 w-3" />}
             </button>
 
-            {/* Enter Green Room / Channel Button */}
             <button
               type="button"
               onClick={(e) => {
@@ -729,7 +680,6 @@ function SidebarBroadcasterItem({ channel, collapsed, isChimed, onToggleChime, n
               className="p-1 text-zinc-600 hover:text-[#e5ff00] transition-colors"
               title="Enter Green Room / Channel"
               aria-label="Enter Green Room"
-              data-testid={`greenroom-btn-${targetUsername}`}
             >
               <Tv className="h-3.5 w-3.5" />
             </button>
