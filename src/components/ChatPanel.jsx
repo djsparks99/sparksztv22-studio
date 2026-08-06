@@ -51,14 +51,17 @@ export default function ChatPanel({ username }) {
   const inputRef = useRef(null);
 
   // Fetch chatter profile for the Twitch-style popup card
-  const handleInspectChatter = async (targetUsername) => {
+  const handleInspectChatter = async (targetUsername, senderPhotoUrl = null) => {
     if (!targetUsername) return;
     setInspectLoading(true);
-    setInspectUser({ username: targetUsername, display_name: targetUsername });
+    setInspectUser({ username: targetUsername, display_name: targetUsername, photo_url: senderPhotoUrl });
     try {
       const { data } = await api.get(`/users/profile/${encodeURIComponent(targetUsername)}`);
       if (data) {
-        setInspectUser(data);
+        setInspectUser({
+          ...data,
+          photo_url: data.photo_url || senderPhotoUrl
+        });
       }
     } catch {
       // Fallback with basic username if fetch fails
@@ -482,9 +485,9 @@ export default function ChatPanel({ username }) {
             </button>
 
             <div className="flex items-center gap-3 border-b border-[#27272a] pb-3">
-              {inspectUser.photo_url ? (
+              {(inspectUser.photo_url || inspectUser.photoUrl || inspectUser.avatar || inspectUser.sender_photo_url) ? (
                 <img
-                  src={fileUrl(inspectUser.photo_url)}
+                  src={fileUrl(inspectUser.photo_url || inspectUser.photoUrl || inspectUser.avatar || inspectUser.sender_photo_url)}
                   alt=""
                   className="h-12 w-12 border border-[#e5ff00] object-cover rounded-sm"
                 />
@@ -833,7 +836,7 @@ function ChatMessage({ m, emotes, onInspectUser }) {
           {/* Clickable Chatter Username to inspect profile */}
           <button
             type="button"
-            onClick={() => onInspectUser(m.sender_username)}
+            onClick={() => onInspectUser(m.sender_username, m.sender_photo_url)}
             className="truncate font-mono text-[11px] font-bold uppercase tracking-widest hover:underline cursor-pointer text-left"
             style={{ color: m.sender_color || "#e5ff00" }}
             title="Click to inspect chatter profile"
