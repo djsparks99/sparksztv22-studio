@@ -90,15 +90,10 @@ export default function TopStreamersHero({ allChannels = [] }) {
   const activeSlug = activeStreamer.username || activeStreamer.channel_id || activeStreamer.id || "channel";
   const activeViews = Number(activeStreamer.viewer_count || activeStreamer.viewerCount || activeStreamer.views || 0);
 
-  // Correctly check thumbnail_url / thumbnailUrl from the dashboard
+  // Directly prioritize dashboard uploaded thumbnail_url or thumbnailUrl over defaults
   const thumbnailSource = activeStreamer.thumbnail_url || activeStreamer.thumbnailUrl || activeStreamer.preview_image || activeStreamer.previewImage;
-  const photoSource = activeStreamer.photo_url || activeStreamer.photoUrl || (activeStreamer.user && (activeStreamer.user.photo_url || activeStreamer.user.photoUrl));
   const activeThumb = thumbnailSource
-    ? fileUrl(thumbnailSource)
-    : photoSource
-    ? fileUrl(photoSource)
-    : activeStreamer.banner_url
-    ? fileUrl(activeStreamer.banner_url)
+    ? (thumbnailSource.startsWith("http") ? thumbnailSource : fileUrl(thumbnailSource))
     : hashPick(activeSlug, FALLBACK_THUMBS);
 
   const isMe = user && (
