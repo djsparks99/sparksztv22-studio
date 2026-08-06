@@ -794,18 +794,19 @@ async function startServer() {
           if (matchedChannel) {
             title = `${matchedChannel.display_name || matchedChannel.username} // ${matchedChannel.stream_title || "Live Stream"}`;
             
-            // Force absolute URL resolution for X, Facebook, and Discord preview card scrapers
+            // Append cache-buster query parameter so social scrapers force-refresh image updates
+            const cacheBuster = `?v=${Date.now()}`;
             const rawPhoto = matchedChannel.photo_url || matchedChannel.thumbnail_url;
             if (rawPhoto) {
               if (rawPhoto.startsWith("http")) {
-                image = rawPhoto;
+                image = `${rawPhoto}${cacheBuster}`;
               } else {
                 const protocol = req.protocol || "https";
                 const host = req.get("host") || "sparkztv.live";
-                image = `${protocol}://${host}${rawPhoto.startsWith("/") ? "" : "/"}${rawPhoto}`;
+                image = `${protocol}://${host}${rawPhoto.startsWith("/") ? "" : "/"}${rawPhoto}${cacheBuster}`;
               }
             } else {
-              image = `https://api.dicebear.com/7.x/bottts/svg?seed=${normalizedId}`;
+              image = `https://sparkztv.live/og-image.png${cacheBuster}`;
             }
           }
         }
