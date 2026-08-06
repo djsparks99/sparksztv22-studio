@@ -13,9 +13,10 @@ import ScheduleDisplay from "@/components/ScheduleDisplay";
 import LiveDuration from "@/components/LiveDuration";
 import UserLocationTime from "@/components/UserLocationTime";
 import { useAuth } from "@/lib/auth-context";
-import { Eye, ArrowLeft, User, Clock } from "lucide-react";
+import { Eye, ArrowLeft, User, Clock, QrCode } from "lucide-react";
 import { useLivepeerAutoPoll } from "@/hooks/useLivepeerAutoPoll";
 import { useMetaTags } from "@/hooks/useMetaTags";
+import { QRCodeSVG } from "qrcode.react";
 
 export default function Channel() {
   const { username } = useParams();
@@ -72,7 +73,6 @@ export default function Channel() {
         if (!cancelled && data) {
           setChannel((prev) => ({
             ...data,
-            // Preserve schedule if API returns empty but prev had it
             schedule: (Array.isArray(data.schedule) && data.schedule.length > 0) ? data.schedule : (prev?.schedule || data.schedule || []),
             photo_url: data.photo_url || prev?.photo_url || null,
           }));
@@ -106,19 +106,16 @@ export default function Channel() {
 
             const merged = { ...prev };
             
-            // Merge all incoming Firestore fields safely without overwriting valid profile pics or schedules with null/undefined
             for (const key of Object.keys(fsData)) {
               if (fsData[key] !== null && fsData[key] !== undefined) {
                 merged[key] = fsData[key];
               }
             }
 
-            // Fallback for avatar / photo_url if Firestore omitted it
             if (!merged.photo_url && prev.photo_url) {
               merged.photo_url = prev.photo_url;
             }
 
-            // Preserve schedule if Firestore update didn't include a new one
             const finalSchedule = (Array.isArray(fsSchedule) && fsSchedule.length > 0)
               ? fsSchedule
               : (prev.schedule || []);
@@ -303,6 +300,33 @@ export default function Channel() {
                   {channel.follower_count || 0} followers
                 </div>
               </div>
+            </div>
+          </div>
+
+          {/* Channel QR Code Card */}
+          <div className="border border-[#27272a] bg-[#0a0a0a] p-6" data-testid="channel-qr-card">
+            <div className="flex items-center gap-2">
+              <QrCode className="h-4 w-4 text-[#e5ff00]" />
+              <div className="label-caps mb-0">// CHANNEL QR CODE</div>
+            </div>
+
+            <p className="mt-2 font-mono text-[11px] leading-relaxed text-zinc-400">
+              Scan or share to tune into <code className="text-[#e5ff00]">@{channel.username}</code>.
+            </p>
+
+            <div className="mt-4 flex flex-col items-center justify-center border border-dashed border-[#27272a] bg-black p-4">
+              <div className="rounded bg-white p-2.5 shadow-lg">
+                <QRCodeSVG
+                  value={`${window.location.origin}/channel/${channel.username}`}
+                  size={130}
+                  bgColor="#ffffff"
+                  fgColor="#000000"
+                  level="M"
+                />
+              </div>
+              <span className="mt-2 font-mono text-[9px] text-zinc-500 uppercase tracking-widest truncate max-w-[200px]">
+                {window.location.origin}/channel/{channel.username}
+              </span>
             </div>
           </div>
 
