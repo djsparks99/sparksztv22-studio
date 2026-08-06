@@ -50,7 +50,6 @@ export default function Channel() {
   }, [username]);
 
   useEffect(() => {
-    setChannel(null);
     setNotFound(false);
     let cancelled = false;
 
@@ -70,7 +69,14 @@ export default function Channel() {
             "x-username": user?.username || ""
           }
         });
-        if (!cancelled) setChannel(data);
+        if (!cancelled && data) {
+          setChannel((prev) => ({
+            ...data,
+            // Preserve schedule if API returns empty but prev had it
+            schedule: (Array.isArray(data.schedule) && data.schedule.length > 0) ? data.schedule : (prev?.schedule || data.schedule || []),
+            photo_url: data.photo_url || prev?.photo_url || null,
+          }));
+        }
       } catch {
         if (!cancelled) setNotFound(true);
       }
@@ -91,38 +97,32 @@ export default function Channel() {
             } catch (e) {}
           }
           setChannel((prev) => {
-            const finalSchedule = Array.isArray(fsSchedule)
-              ? fsSchedule
-              : (Array.isArray(prev?.schedule) ? prev.schedule : []);
-            
             if (!prev) {
               return {
                 ...fsData,
-                schedule: finalSchedule,
+                schedule: Array.isArray(fsSchedule) ? fsSchedule : [],
               };
             }
 
             const merged = { ...prev };
-            const realTimeFields = [
-              "is_live",
-              "viewer_count",
-              "stream_title",
-              "category",
-              "stream_started_at",
-              "playback_id",
-              "livepeer_stream_id",
-              "playbackUrl",
-              "playback_url"
-            ];
-
+            
+            // Merge all incoming Firestore fields safely without overwriting valid profile pics or schedules with null/undefined
             for (const key of Object.keys(fsData)) {
-              if (realTimeFields.includes(key)) {
-                merged[key] = fsData[key];
-              } else if (fsData[key] !== null && fsData[key] !== undefined) {
+              if (fsData[key] !== null && fsData[key] !== undefined) {
                 merged[key] = fsData[key];
               }
             }
 
+            // Fallback for avatar / photo_url if Firestore omitted it
+            if (!merged.photo_url && prev.photo_url) {
+              merged.photo_url = prev.photo_url;
+            }
+
+            // Preserve schedule if Firestore update didn't include a new one
+            const finalSchedule = (Array.isArray(fsSchedule) && fsSchedule.length > 0)
+              ? fsSchedule
+              : (prev.schedule || []);
+            
             merged.schedule = finalSchedule;
             return merged;
           });
@@ -137,7 +137,7 @@ export default function Channel() {
       cancelled = true;
       unsub();
     };
-  }, [username]);
+  }, [username, user?.uid]);
 
   useEffect(() => {
     if (!channel?.is_live) return;

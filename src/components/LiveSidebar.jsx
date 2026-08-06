@@ -331,15 +331,19 @@ export default function LiveSidebar() {
     return !DUMMY_USERNAMES.includes(norm) && !c.is_dummy;
   });
 
-  // Strict Follower Filter: Only allow channels in followedSet
+  // Strict Follower Filter: Only allow channels in followedSet and EXCLUDE the logged-in user themselves from showing up as "live" in their own sidebar feed
   const followedChannels = safeChannels.filter((c) => {
     if (!user) return false;
     const targetUname = getTargetUsername(c).toLowerCase();
+    const myUname = (user.username || "").toLowerCase();
+    if (myUname && targetUname === myUname) return false; // Prevent showing own channel in followed list
     return followedSet.has(targetUname);
   });
 
   const recommendedChannels = safeChannels.filter((c) => {
     const targetUname = getTargetUsername(c).toLowerCase();
+    const myUname = user ? (user.username || "").toLowerCase() : "";
+    if (myUname && targetUname === myUname) return false;
     return !user || !followedSet.has(targetUname);
   });
 
@@ -352,9 +356,6 @@ export default function LiveSidebar() {
   );
 
   const recommendedLive = recommendedChannels.filter((c) => Boolean(c.is_live || c.isLive));
-  const recommendedUpcoming = recommendedChannels.filter(
-    (c) => !Boolean(c.is_live || c.isLive) && Array.isArray(c.schedule) && c.schedule.length > 0
-  );
   const recommendedOffline = recommendedChannels.slice(0, 5);
 
   const hasAnyChannels =
@@ -411,7 +412,7 @@ export default function LiveSidebar() {
           />
         ) : (
           <>
-            {/* ONLY SHOW FOLLOWED LIVE SECTION IF USER FOLLOWS THEM */}
+            {/* STRICT FOLLOWED LIVE SECTION (Only shows if you follow them, never yourself)[cite: 5] */}
             {followedLive.length > 0 && (
               <div>
                 {!collapsed && (
@@ -438,7 +439,7 @@ export default function LiveSidebar() {
               </div>
             )}
 
-            {/* RECOMMENDED / DISCOVER LIVE (Does not show un-followed live as "your live status" unless guest/unfollowed) */}
+            {/* RECOMMENDED LIVE (Only for guests or users following no channels)[cite: 5] */}
             {recommendedLive.length > 0 && (!user || followedChannels.length === 0) && (
               <div>
                 {!collapsed && (
@@ -527,7 +528,7 @@ export default function LiveSidebar() {
               </div>
             )}
 
-            {/* RECOMMENDED CHANNELS (Guests or when user follows no channels) */}
+            {/* RECOMMENDED CHANNELS */}
             {followedChannels.length === 0 && recommendedOffline.length > 0 && (
               <div>
                 {!collapsed && (
