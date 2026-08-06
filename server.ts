@@ -295,6 +295,14 @@ app.options("*", cors());
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
+// Automatically strip tracking query parameters (like fbclid) from incoming requests
+app.use((req: Request, res: Response, next: NextFunction) => {
+  if (req.query.fbclid || req.query.utm_source || req.query.utm_medium) {
+    return res.redirect(301, req.path);
+  }
+  next();
+});
+
 async function startServer() {
   db.channels.clear();
   getMasterChannel().catch((err) => {
@@ -794,7 +802,6 @@ async function startServer() {
           if (matchedChannel) {
             title = `${matchedChannel.display_name || matchedChannel.username} // ${matchedChannel.stream_title || "Live Stream"}`;
             
-            // Append cache-buster query parameter so social scrapers force-refresh image updates
             const cacheBuster = `?v=${Date.now()}`;
             const rawPhoto = matchedChannel.photo_url || matchedChannel.thumbnail_url;
             if (rawPhoto) {
