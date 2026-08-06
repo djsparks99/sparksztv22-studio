@@ -90,7 +90,7 @@ export default function TopStreamersHero({ allChannels = [] }) {
   const activeSlug = activeStreamer.username || activeStreamer.channel_id || activeStreamer.id || "channel";
   const activeViews = Number(activeStreamer.viewer_count || activeStreamer.viewerCount || activeStreamer.views || 0);
 
-  // Preview thumbnail 16:9 check
+  // Correctly check thumbnail_url / thumbnailUrl from the dashboard
   const thumbnailSource = activeStreamer.thumbnail_url || activeStreamer.thumbnailUrl || activeStreamer.preview_image || activeStreamer.previewImage;
   const photoSource = activeStreamer.photo_url || activeStreamer.photoUrl || (activeStreamer.user && (activeStreamer.user.photo_url || activeStreamer.user.photoUrl));
   const activeThumb = thumbnailSource
@@ -191,7 +191,7 @@ export default function TopStreamersHero({ allChannels = [] }) {
                   />
                 </div>
 
-                {/* Preview Thumbnail Overlay (Vanishes instantly when they go live)[cite: 5] */}
+                {/* Preview Thumbnail Overlay (Vanishes instantly when they go live) */}
                 {!isLive && (
                   <div className="absolute inset-0 z-20 bg-black flex items-center justify-center">
                     <img
