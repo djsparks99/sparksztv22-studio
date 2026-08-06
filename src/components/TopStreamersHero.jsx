@@ -51,7 +51,6 @@ export default function TopStreamersHero({ allChannels = [] }) {
     return true;
   });
 
-  // Sort channels by viewer_count descending to automatically surface the top-viewed streamer
   const sortedChannels = [...validChannels].sort((a, b) => {
     const aViews = Number(a.viewer_count || a.viewerCount || a.views || 0);
     const bViews = Number(b.viewer_count || b.viewerCount || b.views || 0);
@@ -91,7 +90,7 @@ export default function TopStreamersHero({ allChannels = [] }) {
   const activeSlug = activeStreamer.username || activeStreamer.channel_id || activeStreamer.id || "channel";
   const activeViews = Number(activeStreamer.viewer_count || activeStreamer.viewerCount || activeStreamer.views || 0);
 
-  // Custom cover image uploaded in dashboard check
+  // Preview thumbnail 16:9 check
   const thumbnailSource = activeStreamer.thumbnail_url || activeStreamer.thumbnailUrl || activeStreamer.preview_image || activeStreamer.previewImage;
   const photoSource = activeStreamer.photo_url || activeStreamer.photoUrl || (activeStreamer.user && (activeStreamer.user.photo_url || activeStreamer.user.photoUrl));
   const activeThumb = thumbnailSource
@@ -174,44 +173,48 @@ export default function TopStreamersHero({ allChannels = [] }) {
             </div>
           </div>
 
-          {/* Right Column: Featured Stream Preview Card */}
+          {/* Right Column: Featured Player & Preview Thumbnail Overlay */}
           <div className="lg:col-span-7" id="featured-streamer-player">
             <div className="group flex flex-col overflow-hidden border border-[#27272a] bg-[#0a0a0a] transition-all hover:border-[#e5ff00] w-full shadow-2xl relative">
               
-              {/* Dashboard custom cover image background when offline */}
-              {!isLive && thumbnailSource && (
-                <div 
-                  className="absolute inset-0 bg-cover bg-center opacity-[0.07] blur-md pointer-events-none"
-                  style={{ backgroundImage: `url(${activeThumb})` }}
-                />
-              )}
-
-              {/* Player / Thumbnail Banner container */}
+              {/* Player / 16:9 Landscape Banner Container */}
               <div className="relative aspect-[16/9] max-h-[360px] w-full overflow-hidden bg-black sm:max-h-[400px]">
-                {isLive ? (
-                  <div className="w-full h-full relative" data-testid="live-player-container">
-                    {/* HlsPlayer configured with controls={false} for a clean preview without controls */}
-                    <HlsPlayer
-                      playbackId={activeStreamer.playback_id || activeStreamer.playbackId}
-                      isLive={true}
-                      muted={true}
-                      autoPlay={true}
-                      controls={false}
-                      poster={activeThumb}
-                    />
-                  </div>
-                ) : (
-                  <img
-                    src={activeThumb}
-                    alt={activeStreamer.display_name || activeSlug}
-                    referrerPolicy="no-referrer"
-                    className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
+                
+                {/* Active Live Player Stream */}
+                <div className="w-full h-full relative" data-testid="live-player-container">
+                  <HlsPlayer
+                    playbackId={activeStreamer.playback_id || activeStreamer.playbackId}
+                    isLive={isLive}
+                    muted={true}
+                    autoPlay={true}
+                    controls={false}
                   />
+                </div>
+
+                {/* Preview Thumbnail Overlay (Vanishes instantly when they go live)[cite: 5] */}
+                {!isLive && (
+                  <div className="absolute inset-0 z-20 bg-black flex items-center justify-center">
+                    <img
+                      src={activeThumb}
+                      alt={activeStreamer.display_name || activeSlug}
+                      referrerPolicy="no-referrer"
+                      className="h-full w-full object-cover"
+                    />
+                    <div className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center p-4 text-center">
+                      <span className="border border-[#e5ff00]/40 bg-black/80 px-3 py-1 font-mono text-xs uppercase tracking-widest text-[#e5ff00] mb-2">
+                        SIGNAL OFFLINE — PREVIEW BANNER
+                      </span>
+                      <p className="font-mono text-xs text-zinc-300">
+                        Broadcaster is currently standby. Tune in when live transmission begins.
+                      </p>
+                    </div>
+                  </div>
                 )}
-                <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a0a] via-black/30 to-transparent pointer-events-none" />
+
+                <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a0a] via-transparent to-transparent pointer-events-none z-25" />
 
                 {/* Top Badges */}
-                <div className="absolute left-3 top-3 flex flex-wrap items-center gap-2 z-10">
+                <div className="absolute left-3 top-3 flex flex-wrap items-center gap-2 z-30">
                   <span className="flex items-center gap-1 bg-[#e5ff00] px-2.5 py-0.5 font-mono text-[11px] font-black uppercase text-black">
                     <Trophy className="h-3 w-3" /> FEATURED
                   </span>
@@ -226,21 +229,10 @@ export default function TopStreamersHero({ allChannels = [] }) {
 
                 {/* Viewer count badge */}
                 {isLive && (
-                  <div className="absolute right-3 top-3 flex items-center gap-1 border border-[#27272a] bg-black/85 px-2.5 py-0.5 font-mono text-[11px] font-bold text-white backdrop-blur-md z-10">
+                  <div className="absolute right-3 top-3 flex items-center gap-1 border border-[#27272a] bg-black/85 px-2.5 py-0.5 font-mono text-[11px] font-bold text-white backdrop-blur-md z-30">
                     <Eye className="h-3 w-3 text-[#e5ff00]" />
                     <span className="text-[#e5ff00]">{activeViews}</span> VIEWERS
                   </div>
-                )}
-
-                {!isLive && (
-                  <Link
-                    to={`/channel/${activeSlug}`}
-                    className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100 z-10"
-                  >
-                    <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[#e5ff00] text-black shadow-lg transition-transform group-hover:scale-110">
-                      <Play className="ml-1 h-7 w-7 fill-black" />
-                    </div>
-                  </Link>
                 )}
               </div>
 
