@@ -130,6 +130,7 @@ interface UserDoc {
   password_hash: string;
   created_at: string;
   watts?: number;
+  follows?: string[]; // UIDs or usernames followed
 }
 
 interface ChannelDoc {
@@ -149,7 +150,7 @@ interface ChannelDoc {
   record_enabled: boolean;
   last_updated: string;
   rtmp_url?: string;
-  schedule?: any;
+  schedules?: any[]; // Multiple schedules supporting image & edit/delete
 }
 
 class InMemStore {
@@ -172,12 +173,16 @@ class InMemStore {
       password_hash: bcrypt.hashSync("password123", 8),
       created_at: now,
       watts: 2500,
+      follows: [],
     };
     this.users.set(djsparkzUser.uid, djsparkzUser);
   }
 }
 
 const db = new InMemStore();
+
+// Track unique active viewers by room using incoming IP addresses
+const activeViewersPerRoom = new Map<string, Set<string>>();
 
 const DUMMY_USERNAMES = [
   "pirate_fm", "acid_vault", "dub_station", "test", "demo", "undefined", "null", "dummy", "user", "channel"
@@ -201,7 +206,7 @@ function isDummyOrInvalid(channel: any) {
   return false;
 }
 
-function channelPublic(c: ChannelDoc, opts: { include_stream_key?: boolean } = {}) {
+function channelPublic(c: ChannelDoc, opts: { include_stream_key?: boolean, viewerIp?: string } = {}) {
   if (!c || c.channel_id === "undefined" || c.username === "undefined") return {};
   
   const isMaster = (c.username || "").toLowerCase() === "djsparkz" || c.user_uid === "nsU1v44XFnN3FloJvNePqj6cBG2";
@@ -213,6 +218,10 @@ function channelPublic(c: ChannelDoc, opts: { include_stream_key?: boolean } = {
   const displayName = isMaster ? "djsparkz" : (c.display_name || username);
   const userUid = isMaster ? "nsU1v44XFnN3FloJvNePqj6cBG2" : (c.user_uid || "");
   const playbackId = c.playback_id || "";
+
+  // Compute live unique viewer count based on active IP connections
+  const roomViewers = activeViewersPerRoom.get(username);
+  const trueViewerCount = roomViewers ? roomViewers.size : (c.viewer_count || 0);
 
   const out: Record<string, any> = {
     channel_id: channelId,
@@ -232,9 +241,10 @@ function channelPublic(c: ChannelDoc, opts: { include_stream_key?: boolean } = {
     category: c.category || "music",
     is_live: Boolean(c.is_live),
     isLive: Boolean(c.is_live),
-    viewer_count: c.viewer_count || 0,
+    viewer_count: trueViewerCount,
     last_updated: c.last_updated,
-    schedule: c.schedule || null,
+    schedules: c.schedules || [],
+    schedule: c.schedules && c.schedules.length > 0 ? c.schedules[0] : null,
   };
 
   if (opts.include_stream_key) {
@@ -256,7 +266,7 @@ async function getMasterChannel() {
       channel_id: "djsparkz",
       user_uid: "nsU1v44XFnN3FloJvNePqj6cBG2",
       username: "djsparkz",
-      display_name: "djsparkz",
+      display_name: user?.display_name || "djsparkz",
       photo_url: user?.photo_url || null,
       thumbnail_url: null,
       ivs_channel_arn: ivsData.arn,
@@ -269,6 +279,7 @@ async function getMasterChannel() {
       record_enabled: true,
       last_updated: new Date().toISOString(),
       rtmp_url: ivsData.ingestEndpoint,
+      schedules: [],
     };
     db.channels.set("djsparkz", chan);
     db.channels.set("nsU1v44XFnN3FloJvNePqj6cBG2", chan);
@@ -428,6 +439,7 @@ async function startServer() {
           password_hash: "",
           created_at: new Date().toISOString(),
           watts: 2500,
+          follows: [],
         };
         db.users.set(fallbackUid, user);
       }
@@ -460,6 +472,7 @@ async function startServer() {
           password_hash: "",
           created_at: new Date().toISOString(),
           watts: isDjSparkz ? 2500 : 100,
+          follows: [],
         };
         db.users.set(uid, user);
       }
@@ -523,6 +536,36 @@ async function startServer() {
   api.put("/users/me", authMiddleware, handleUserUpdate);
   api.post("/users/me", authMiddleware, handleUserUpdate);
 
+  // Endpoint to get any chatter's profile details (Twitch style profile inspection)
+  api.get("/users/profile/:username", async (req, res) => {
+    try {
+      const usernameParam = req.params.username.toLowerCase();
+      let targetUser: UserDoc | undefined = undefined;
+      for (const u of db.users.values()) {
+        if (u.username.toLowerCase() === usernameParam) {
+          targetUser = u;
+          break;
+        }
+      }
+
+      if (!targetUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      return res.json({
+        username: targetUser.username,
+        display_name: targetUser.display_name,
+        photo_url: targetUser.photo_url,
+        bio: targetUser.bio,
+        created_at: targetUser.created_at,
+        watts: targetUser.watts || 100,
+        followers_count: targetUser.follows ? targetUser.follows.length : 0,
+      });
+    } catch (e: any) {
+      return res.status(500).json({ error: "Failed to fetch user profile", details: e.message });
+    }
+  });
+
   const handleChannelUpdate = async (req: Request, res: Response) => {
     try {
       const channel = await getMasterChannel();
@@ -535,9 +578,6 @@ async function startServer() {
           return res.status(400).json({ error: "Category must be a string" });
         }
         channel.category = req.body.category;
-      }
-      if (req.body?.schedule !== undefined) {
-        channel.schedule = req.body.schedule;
       }
       if (req.body?.thumbnail_url !== undefined) {
         channel.thumbnail_url = req.body.thumbnail_url;
@@ -553,15 +593,73 @@ async function startServer() {
   api.put("/channels/mine", handleChannelUpdate);
   api.post("/channels/mine", handleChannelUpdate);
 
-  api.post("/channels/mine/schedule", async (req, res) => {
+  // Advanced schedule management endpoints (Add, Edit, Delete with picture support)
+  api.get("/channels/mine/schedules", async (req, res) => {
     try {
       const channel = await getMasterChannel();
-      if (req.body?.schedule !== undefined) {
-        channel.schedule = req.body.schedule;
+      return res.json(channel.schedules || []);
+    } catch (e: any) {
+      return res.status(500).json({ error: "Failed to fetch schedules" });
+    }
+  });
+
+  api.post("/channels/mine/schedules", async (req, res) => {
+    try {
+      const channel = await getMasterChannel();
+      if (!channel.schedules) channel.schedules = [];
+
+      const newSchedule = {
+        id: "sched-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7),
+        title: req.body.title || "Scheduled Broadcast",
+        description: req.body.description || "",
+        startTime: req.body.startTime || new Date().toISOString(),
+        imageUrl: req.body.imageUrl || req.body.image || null,
+      };
+
+      channel.schedules.push(newSchedule);
+      return res.json({ success: true, schedules: channel.schedules });
+    } catch (e: any) {
+      return res.status(500).json({ error: "Failed to create schedule" });
+    }
+  });
+
+  api.put("/channels/mine/schedules/:id", async (req, res) => {
+    try {
+      const channel = await getMasterChannel();
+      if (!channel.schedules) channel.schedules = [];
+
+      const schedId = req.params.id;
+      const index = channel.schedules.findIndex((s: any) => s.id === schedId);
+
+      if (index === -1) {
+        return res.status(404).json({ error: "Schedule not found" });
       }
-      return res.json({ success: true, schedule: channel.schedule });
-    } catch (err: any) {
+
+      channel.schedules[index] = {
+        ...channel.schedules[index],
+        title: req.body.title ?? channel.schedules[index].title,
+        description: req.body.description ?? channel.schedules[index].description,
+        startTime: req.body.startTime ?? channel.schedules[index].startTime,
+        imageUrl: req.body.imageUrl ?? req.body.image ?? channel.schedules[index].imageUrl,
+      };
+
+      return res.json({ success: true, schedules: channel.schedules });
+    } catch (e: any) {
       return res.status(500).json({ error: "Failed to update schedule" });
+    }
+  });
+
+  api.delete("/channels/mine/schedules/:id", async (req, res) => {
+    try {
+      const channel = await getMasterChannel();
+      if (!channel.schedules) channel.schedules = [];
+
+      const schedId = req.params.id;
+      channel.schedules = channel.schedules.filter((s: any) => s.id !== schedId);
+
+      return res.json({ success: true, schedules: channel.schedules });
+    } catch (e: any) {
+      return res.status(500).json({ error: "Failed to delete schedule" });
     }
   });
 
@@ -783,6 +881,11 @@ async function startServer() {
       }
 
       const roomName = decodeURIComponent(chatMatch[1]);
+      
+      // Extract client IP address for accurate unique viewer tracking
+      const forwardedFor = request.headers["x-forwarded-for"];
+      const clientIp = (typeof forwardedFor === "string" ? forwardedFor.split(",")[0] : null) || request.socket.remoteAddress || "unknown-ip";
+
       const token = urlObj.searchParams.get("token") || "";
       const guestNameParam = urlObj.searchParams.get("guest_name") || "";
 
@@ -820,6 +923,7 @@ async function startServer() {
               password_hash: "",
               created_at: new Date().toISOString(),
               watts: isDjSparkz ? 2500 : 100,
+              follows: [],
             };
             db.users.set(uid, localUser);
           }
@@ -857,7 +961,8 @@ async function startServer() {
         photoUrl,
         badges,
         color,
-        roomName
+        roomName,
+        clientIp
       };
 
       if (!chatRooms.has(roomName)) {
@@ -865,7 +970,13 @@ async function startServer() {
       }
       chatRooms.get(roomName)!.add(client);
 
-      console.log(`[WS] User ${username} connected to room: ${roomName}`);
+      // Register unique IP into room viewer set
+      if (!activeViewersPerRoom.has(roomName)) {
+        activeViewersPerRoom.set(roomName, new Set());
+      }
+      activeViewersPerRoom.get(roomName)!.add(clientIp);
+
+      console.log(`[WS] User ${username} (IP: ${clientIp}) connected to room: ${roomName}. Active viewers: ${activeViewersPerRoom.get(roomName)!.size}`);
 
       const history = chatHistory.get(roomName) || [];
       for (const msg of history) {
@@ -953,6 +1064,18 @@ async function startServer() {
         const roomClients = chatRooms.get(roomName);
         if (roomClients) {
           roomClients.delete(client);
+          
+          // Re-evaluate active unique IPs for this room
+          const remainingIps = new Set<string>();
+          for (const c of roomClients) {
+            remainingIps.add(c.clientIp);
+          }
+          if (remainingIps.size > 0) {
+            activeViewersPerRoom.set(roomName, remainingIps);
+          } else {
+            activeViewersPerRoom.delete(roomName);
+          }
+
           if (roomClients.size === 0) {
             chatRooms.delete(roomName);
           }
