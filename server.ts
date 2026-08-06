@@ -130,7 +130,7 @@ interface UserDoc {
   password_hash: string;
   created_at: string;
   watts?: number;
-  follows?: string[]; // UIDs or usernames followed
+  follows?: string[];
 }
 
 interface ChannelDoc {
@@ -150,7 +150,7 @@ interface ChannelDoc {
   record_enabled: boolean;
   last_updated: string;
   rtmp_url?: string;
-  schedules?: any[]; // Multiple schedules supporting image & edit/delete
+  schedules?: any[];
 }
 
 class InMemStore {
@@ -181,7 +181,6 @@ class InMemStore {
 
 const db = new InMemStore();
 
-// Track unique active viewers by room using incoming IP addresses
 const activeViewersPerRoom = new Map<string, Set<string>>();
 
 const DUMMY_USERNAMES = [
@@ -219,7 +218,6 @@ function channelPublic(c: ChannelDoc, opts: { include_stream_key?: boolean, view
   const userUid = isMaster ? "nsU1v44XFnN3FloJvNePqj6cBG2" : (c.user_uid || "");
   const playbackId = c.playback_id || "";
 
-  // Compute live unique viewer count based on active IP connections
   const roomViewers = activeViewersPerRoom.get(username);
   const trueViewerCount = roomViewers ? roomViewers.size : (c.viewer_count || 0);
 
@@ -536,7 +534,6 @@ async function startServer() {
   api.put("/users/me", authMiddleware, handleUserUpdate);
   api.post("/users/me", authMiddleware, handleUserUpdate);
 
-  // Endpoint to get any chatter's profile details (Twitch style profile inspection)
   api.get("/users/profile/:username", async (req, res) => {
     try {
       const usernameParam = req.params.username.toLowerCase();
@@ -593,7 +590,6 @@ async function startServer() {
   api.put("/channels/mine", handleChannelUpdate);
   api.post("/channels/mine", handleChannelUpdate);
 
-  // Advanced schedule management endpoints (Add, Edit, Delete with picture support)
   api.get("/channels/mine/schedules", async (req, res) => {
     try {
       const channel = await getMasterChannel();
@@ -797,11 +793,16 @@ async function startServer() {
 
           if (matchedChannel) {
             title = `${matchedChannel.display_name || matchedChannel.username} // ${matchedChannel.stream_title || "Live Stream"}`;
-            if (matchedChannel.photo_url) {
-              if (matchedChannel.photo_url.startsWith("http")) {
-                image = matchedChannel.photo_url;
+            
+            // Force absolute URL resolution for X, Facebook, and Discord preview card scrapers
+            const rawPhoto = matchedChannel.photo_url || matchedChannel.thumbnail_url;
+            if (rawPhoto) {
+              if (rawPhoto.startsWith("http")) {
+                image = rawPhoto;
               } else {
-                image = `${req.protocol}://${req.get("host")}${matchedChannel.photo_url}`;
+                const protocol = req.protocol || "https";
+                const host = req.get("host") || "sparkztv.live";
+                image = `${protocol}://${host}${rawPhoto.startsWith("/") ? "" : "/"}${rawPhoto}`;
               }
             } else {
               image = `https://api.dicebear.com/7.x/bottts/svg?seed=${normalizedId}`;
@@ -882,7 +883,6 @@ async function startServer() {
 
       const roomName = decodeURIComponent(chatMatch[1]);
       
-      // Extract client IP address for accurate unique viewer tracking
       const forwardedFor = request.headers["x-forwarded-for"];
       const clientIp = (typeof forwardedFor === "string" ? forwardedFor.split(",")[0] : null) || request.socket.remoteAddress || "unknown-ip";
 
@@ -970,7 +970,6 @@ async function startServer() {
       }
       chatRooms.get(roomName)!.add(client);
 
-      // Register unique IP into room viewer set
       if (!activeViewersPerRoom.has(roomName)) {
         activeViewersPerRoom.set(roomName, new Set());
       }
@@ -1065,7 +1064,6 @@ async function startServer() {
         if (roomClients) {
           roomClients.delete(client);
           
-          // Re-evaluate active unique IPs for this room
           const remainingIps = new Set<string>();
           for (const c of roomClients) {
             remainingIps.add(c.clientIp);
