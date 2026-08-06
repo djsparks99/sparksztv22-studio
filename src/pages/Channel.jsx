@@ -54,7 +54,6 @@ export default function Channel() {
     setNotFound(false);
     let cancelled = false;
 
-    // First fetch via API
     const load = async () => {
       if (!username || username === "undefined" || username === "null") {
         return;
@@ -83,7 +82,6 @@ export default function Channel() {
     };
     load();
 
-    // Also listen to Firestore doc for real-time live state changes
     const targetDocId = username ? username.toLowerCase() : "";
     const unsub = onSnapshot(
       doc(db, "channels", targetDocId),
@@ -147,9 +145,7 @@ export default function Channel() {
             prev ? { ...prev, viewer_count: data.viewer_count } : prev
           );
         }
-      } catch {
-        // heartbeat failures shouldn't break playback
-      }
+      } catch {}
     };
     beat();
     const t = setInterval(beat, 15000);
@@ -194,10 +190,10 @@ export default function Channel() {
       </Link>
 
       <div className="grid gap-6 lg:grid-cols-12">
-        <div className="lg:col-span-8">
+        <div className="lg:col-span-8 flex flex-col gap-6">
           <HlsPlayer playbackId={channel.playback_id} isLive={channel.is_live} />
 
-          <div className="mt-6 border border-[#27272a] bg-[#0a0a0a] p-6">
+          <div className="border border-[#27272a] bg-[#0a0a0a] p-6">
             <div className="flex flex-col items-start justify-between gap-4 lg:flex-row lg:items-center">
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
@@ -265,19 +261,27 @@ export default function Channel() {
             </div>
           </div>
 
+          {/* MOBILE CHAT PLACEMENT: Appears directly under video/meta card on mobile/tablet */}
+          <div className="block lg:hidden w-full">
+            <ChatPanel username={channel.username} />
+          </div>
+
           {/* Schedule */}
-          <div className="mt-6">
+          <div>
             <ScheduleDisplay schedule={channel.schedule} username={channel.username} />
           </div>
 
           {/* Past sets */}
-          <div className="mt-6">
+          <div>
             <SessionList username={channel.username} />
           </div>
         </div>
 
         <aside className="lg:col-span-4 space-y-4">
-          <ChatPanel username={channel.username} />
+          {/* DESKTOP CHAT PLACEMENT: Appears in the sidebar on large screens */}
+          <div className="hidden lg:block">
+            <ChatPanel username={channel.username} />
+          </div>
 
           <div className="border border-[#27272a] bg-[#0a0a0a] p-6">
             <div className="label-caps">// BROADCASTER</div>
